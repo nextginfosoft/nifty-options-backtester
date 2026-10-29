@@ -68,10 +68,10 @@ Source: `paper_trading/tracker/QUOTE_LOG.csv`, 13 snapshots, only ONE clean in-w
 
 **Next tasks (replace T1-T3):**
 1. Keep logging until >= 10 clean in-window dates across VIX <13, 13-20, >20 and both Monday/Tuesday entries; re-run `summarize_quote_log.py` per VIX bucket. The VIX >= 25 loss bucket has no coverage.
-2. Fetch bhavcopy for 2026-10-19, 21, 22, 23, 26, 27 and later logged days into `~/nse_fo_archive/daily/` (licence-restricted, never commit), then compute EOD-settle credit minus intraday mid credit (`basis_gap.md` lists what is needed). Intraday mid credit varies 1.1-1.4 pts/unit (condor) and 3.2-3.4 (PCS), more than the spread.
+2. (First pass done 2026-10-29, see Update (b); repeat as more logged days get published.) Fetch bhavcopy for 2026-10-19, 21, 22, 23, 26, 27 and later logged days into `~/nse_fo_archive/daily/` (licence-restricted, never commit), then compute EOD-settle credit minus intraday mid credit (`basis_gap.md` lists what is needed). Intraday mid credit varies 1.1-1.4 pts/unit (condor) and 3.2-3.4 (PCS), more than the spread.
 3. Run 2024-26 for the 16 dev-pass scan cells that have a frozen definition, as one pre-registered batch, before anyone relies on them.
 4. Depth check: share of snapshots with bid/ask qty >= lots x 65 at the short strikes, to cap lots (2% cap is ~3 lots).
-5. Forward paper-trade IC09_200 at VIX 16-20 (frozen), log intended vs achieved fills. This is the only clean holdout.
+5. Forward paper-trade IC09_200 at VIX 16-20 (frozen 2026-10-29, see T3-final), log intended vs achieved fills. This is the only clean holdout.
 6. 12% route remains a user decision.
 
 ## Update 2026-10-29: out-of-sample test of the repo's weekly ML entry + exit gates (NO DEMONSTRATED EDGE)
@@ -85,3 +85,30 @@ Primary cell EX (entry 0.55 + exit prob>=0.75 and pnl<-15%) at m=0.30: n=80 of 2
 - Sensitivities (0.50, 0.60 thresholds) are exploratory and also fail item 1.
 
 **Verdict:** the ML gates add no demonstrated edge over the rule-based weekly system; do not wire them into live decisions. The rule-based replay (+73..+133 per lot per trade at 0.30x, CI includes zero) is unchanged by this test.
+
+## Update 2026-10-29 (b): EOD-settle vs intraday-mid entry basis, first measurement
+- Archive extended to 2026-10-28 from the NSE new-format F&O bhavcopy (converted to the archive layout; mapping checked on 2026-10-16: 1882 of 1882 rows identical). 2026-10-20 is a holiday; 2026-10-29 was not yet published.
+- Gap = same-day EOD settle credit minus intraday quote-log mid credit, same strikes, per unit (pts). Two usable days only (10-26 one forced snapshot, 10-28 twelve in-window snapshots), so this is a first look, not a measurement.
+
+| Structure | Expiry | Day | n | EOD minus mid (pts) |
+|---|---|---|---|---|
+| IC | 03-Nov | 10-26 / 10-28 | 1 / 12 | +3.2 / +0.1 (range -6.5..+3.8) |
+| IC | 09-Nov | 10-26 / 10-28 | 1 / 12 | +3.1 / +2.4 (range -4.7..+5.5) |
+| PCS | both | 10-26 / 10-28 | 1 / 12 | -4.4..-5.9 / -7.6..-8.0 |
+
+- Condor: EOD credit is above the intraday mid by about +1.3 pts/unit on average (about Rs 85 per lot at 65 units, within the 1-2 pt haircut assumed earlier). The backtest therefore overstates the achievable condor credit, and this is on top of the 0.30x slippage, which models only the half-spread to mid.
+- PCS: the negative gap is directional, not a bias. Spot rose 60-90 pts between the snapshot and the close on both days and a short put spread loses credit as spot rises; a condor is close to delta-neutral, so its gap is the cleaner number.
+- Not yet known: whether the condor gap persists on days when spot falls (should flip PCS sign, leave IC near +1), and the IC range is wide (-6.5..+5.5) so n=2 days cannot give a CI. Keep logging.
+
+## T3-final. Forward paper-trade, pre-registered 2026-10-29 (before any qualifying trade)
+Only IC09_200 | VIX 16-20 survived the cost-adjusted harness (walk-forward CI included zero; VIX band chosen post hoc; 2024-26 reused). This is the only clean holdout.
+- Rule (frozen): weekly NIFTY iron condor, shorts at 0.9 SD rounded to 50, 200-pt wings, entry on the first in-window quote after the signal day when India VIX is 16-20, expiry at the nearest weekly with 3-8 DTE, hold to expiry (no stop, no early exit), 4 lots (max loss about Rs 50,000 or less, 2% of Rs 25L). No parameter, band, size or exit change once the first qualifying trade is logged.
+- Fills logged per trade: intended (quote-log mid) and achieved-proxy (natural: sell at bid, buy at ask), plus expiry settle from the bhavcopy archive. Paper only; nothing places orders.
+- Primary metric: net Rs per lot per trade using the natural-fill proxy and the repo fee model, hold to expiry at intrinsic.
+- Horizon: stop at 30 qualifying trades or 2028-10-31, whichever is first. Cumulative-loss stop: paper loss of Rs 75,000 (3% of the fund) ends the test as FAIL.
+- Interim look only at 12 trades, and only for the loss stop; no early PASS.
+- PASS (all): mean net per lot > 0; 95% bootstrap CI lower bound > 0 over the trades; win rate >= 55%; achieved-proxy credit is within 2 pts/unit of the EOD-settle credit for the same strikes on average (else the backtest basis is rejected).
+- Worst-case line: no single trade loses more than the structural max loss (Rs 13,000 per lot at 200-pt wings minus credit); a larger loss means a pricing or fill bug and voids that trade for review, not for exclusion.
+- Anything short = no demonstrated edge; do not scale. If fewer than 30 trades by the end date, report as inconclusive, not as pass.
+- Expected pace: about 1 qualifying cycle in 4, so 30 trades takes about 2 years; expect to end on the date, not the count. The honest read in 6 months is "too early".
+- Freeze check each week: `git log` on this section must show no edit after the first logged trade.
