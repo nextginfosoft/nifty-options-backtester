@@ -102,7 +102,7 @@ Primary cell EX (entry 0.55 + exit prob>=0.75 and pnl<-15%) at m=0.30: n=80 of 2
 
 ## T3-final. Forward paper-trade, pre-registered 2026-10-29 (before any qualifying trade)
 Only IC09_200 | VIX 16-20 survived the cost-adjusted harness (walk-forward CI included zero; VIX band chosen post hoc; 2024-26 reused). This is the only clean holdout.
-- Rule (frozen): weekly NIFTY iron condor, shorts at 0.9 SD rounded to 50, 200-pt wings, entry on the first in-window quote after the signal day when India VIX is 16-20, expiry at the nearest weekly with 3-8 DTE, hold to expiry (no stop, no early exit), 4 lots (max loss about Rs 50,000 or less, 2% of Rs 25L). No parameter, band, size or exit change once the first qualifying trade is logged.
+- Rule (frozen): weekly NIFTY iron condor, shorts at 0.9 SD rounded to 50, 200-pt wings, entry on the first in-window quote after the signal day when India VIX is 16-20, expiry at the nearest weekly with 3-8 DTE, hold to expiry (no stop, no early exit), 3 lots (max loss about Rs 39,000, inside the 2% = Rs 50,000 cap; 4 lots would exceed it). No parameter, band, size or exit change once the first qualifying trade is logged.
 - Fills logged per trade: intended (quote-log mid) and achieved-proxy (natural: sell at bid, buy at ask), plus expiry settle from the bhavcopy archive. Paper only; nothing places orders.
 - Primary metric: net Rs per lot per trade using the natural-fill proxy and the repo fee model, hold to expiry at intrinsic.
 - Horizon: stop at 30 qualifying trades or 2028-10-31, whichever is first. Cumulative-loss stop: paper loss of Rs 75,000 (3% of the fund) ends the test as FAIL.
