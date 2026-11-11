@@ -20,7 +20,8 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from api import auth, broker_routes, routes_ledger, server
+from api import auth, autologin, broker_routes, credentials_routes, routes_ledger, server
+from api.credentials import CredentialError, CredentialStore
 from api.ledger import Ledger, LedgerError, NotFound
 from api.settings import Settings, load_settings
 
@@ -30,18 +31,26 @@ _CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inli
         "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 
 
-def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] = None) -> FastAPI:
+def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] = None,
+               run_scheduler: Optional[bool] = None) -> FastAPI:
     settings = settings or load_settings()
     load_market = settings.load_market_on_start if load_market is None else load_market
+    run_scheduler = load_market if run_scheduler is None else run_scheduler
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         restored = broker_routes.load_saved_token(settings.storage_dir)
         logger.info("Kite token restored from disk: %s", restored)
+        try:
+            credentials_routes.apply_to_environment(app.state.creds.load())
+        except CredentialError as exc:
+            logger.error("Stored Zerodha credentials unusable: %s", exc)
         task = asyncio.create_task(asyncio.to_thread(server.load_all)) if load_market else None
+        sched = asyncio.create_task(autologin.scheduler(app)) if run_scheduler else None
         yield
-        if task and not task.done():
-            task.cancel()
+        for t in (task, sched):
+            if t and not t.done():
+                t.cancel()
 
     app = FastAPI(
         title="Nifty Paper Trading API",
@@ -53,6 +62,7 @@ def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] 
     )
     app.state.settings = settings
     app.state.ledger = Ledger(settings.storage_dir / "ledger.sqlite3")
+    app.state.creds = CredentialStore(settings.storage_dir, settings.credentials_key, settings.is_production)
 
     @app.exception_handler(NotFound)
     async def _not_found(_: Request, exc: NotFound):
@@ -81,6 +91,7 @@ def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] 
     protected.include_router(server.router)
     protected.include_router(routes_ledger.router)
     protected.include_router(broker_routes.router)
+    protected.include_router(credentials_routes.router)
     api.include_router(protected)
     app.include_router(api)
 

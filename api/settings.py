@@ -37,6 +37,7 @@ class Settings:
     enable_docs: bool
     lot_size: int
     load_market_on_start: bool
+    credentials_key: Optional[str] = None   # encrypts stored Zerodha credentials
 
     @property
     def is_production(self) -> bool:
@@ -78,4 +79,5 @@ def load_settings() -> Settings:
         enable_docs=_flag("ENABLE_DOCS", not production),
         lot_size=int(os.getenv("LOT_SIZE") or 65),
         load_market_on_start=_flag("LOAD_MARKET_ON_START", True),
+        credentials_key=(os.getenv("CREDENTIALS_KEY") or None),
     )

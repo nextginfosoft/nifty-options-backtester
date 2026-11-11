@@ -59,7 +59,8 @@ Fill in:
 | `DOMAIN` | your hostname, e.g. `dashboard.yourdomain.com` |
 | `DASHBOARD_PASSWORD` | the login password. `openssl rand -base64 24` |
 | `SESSION_SECRET` | `openssl rand -hex 32` (32+ characters; the app refuses to start without it) |
-| `KITE_API_KEY` / `KITE_API_SECRET` | optional, from developers.kite.trade |
+| `KITE_API_KEY` / `KITE_API_SECRET` | optional, from developers.kite.trade (or enter them in the dashboard, see step 6) |
+| `CREDENTIALS_KEY` | `openssl rand -hex 32`. Needed to save Zerodha details from the dashboard; keep it out of the data volume and backups. If you change it, saved credentials must be re-entered |
 
 `deploy/.env` is git-ignored. Never commit it, and never put these values in front-end code.
 
@@ -78,6 +79,23 @@ Open `https://YOUR_DOMAIN`, sign in, and check the header shows **Data ready**.
    server (`kite_token.json` in the data volume) and is never sent to the browser.
 
 Live quotes need a Kite Connect plan that includes market data; check Zerodha's current plans.
+
+### Optional: store credentials in the dashboard and log in automatically
+**Broker → Zerodha credentials** takes the Zerodha user id, login password, Kite Connect API key and secret, and the
+TOTP secret key (the base32 key shown when you set up 2FA, not the 6-digit code). With "log in automatically" ticked the
+server connects Kite itself after 06:30 IST each day.
+
+Read this before enabling it:
+- Your login password plus TOTP secret give **full login access to your Zerodha account** (including real funds). Anyone who
+  compromises this server, or gets both `CREDENTIALS_KEY` and a copy of the data volume, can use them.
+- Zerodha does not officially support automated login. It can stop working, or be blocked, without notice. You are
+  responsible for complying with Zerodha's terms.
+- Failed logins can lock the account, so the app makes at most 2 automatic attempts a day, 15 minutes apart, and stops
+  after Zerodha rejects the credentials until you update them.
+- Values are encrypted at rest (key from `CREDENTIALS_KEY`), write-only in the UI (never sent back to the browser), and
+  never logged. **Remove credentials** deletes them and today's Kite session.
+- The API key and secret alone are enough for the safer manual **Connect Kite** flow. Prefer that if you can.
+- The first run needs the Kite app authorised once; do that once with **Connect Kite** if auto-login reports it cannot get a token.
 
 ## 7. Operate
 | Task | Command (in `/opt/nifty/deploy`) |

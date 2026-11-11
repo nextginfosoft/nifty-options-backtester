@@ -216,7 +216,8 @@ def test_broker_status_unconfigured(authed, monkeypatch):
     monkeypatch.delenv("KITE_API_KEY", raising=False)
     monkeypatch.delenv("KITE_API_SECRET", raising=False)
     assert authed.get("/api/broker/status").json() == {
-        "broker": "none", "configured": False, "connected": False, "token_expires_at": None}
+        "broker": "none", "configured": False, "connected": False, "token_expires_at": None,
+        "auto_login_enabled": False, "last_login": None}
     assert authed.get("/api/broker/kite/login-url").status_code == 400
     assert authed.get("/api/broker/live").json()["ok"] is False
 

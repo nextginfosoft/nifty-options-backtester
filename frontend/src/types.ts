@@ -126,11 +126,36 @@ export interface DailyEntry {
   notes: string;
 }
 
+export interface LoginResult {
+  at: string;
+  ok: boolean;
+  message: string;
+  automatic: boolean;
+}
+
 export interface BrokerStatus {
   broker: "kite" | "none";
   configured: boolean;
   connected: boolean;
   token_expires_at: string | null;
+  auto_login_enabled: boolean;
+  last_login: LoginResult | null;
+}
+
+export type CredentialField = "user_id" | "password" | "api_key" | "api_secret" | "totp_secret";
+
+/** Write-only: the server returns flags and a masked user id, never the values. */
+export interface CredentialsView {
+  encryption_available: boolean;
+  key_source: string;
+  saved: Record<CredentialField, boolean>;
+  user_id_masked: string;
+  auto_login_enabled: boolean;
+  updated_at: string | null;
+  error: string | null;
+  last_login: LoginResult | null;
+  auto_login_attempts_today: number;
+  auto_login_blocked: boolean;
 }
 
 export interface Live {

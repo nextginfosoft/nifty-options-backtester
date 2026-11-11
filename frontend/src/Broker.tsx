@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, useApi } from "./api";
 import { num } from "./format";
 import type { BrokerStatus, Live } from "./types";
+import Credentials from "./Credentials";
 import { Banner, Card, ErrorText, Pill, Row } from "./ui";
 
 export default function Broker() {
@@ -98,6 +99,8 @@ export default function Broker() {
           )}
         </Card>
       </div>
+
+      <Credentials onChanged={() => { status.reload(); live.reload(); }} />
 
       <Card title="Fallback: paste a request token">
         <p className="note" style={{ marginTop: 0 }}>

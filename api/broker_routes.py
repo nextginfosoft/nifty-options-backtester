@@ -79,6 +79,16 @@ def _save_token(storage_dir: Path, access_token: str) -> datetime:
     return now
 
 
+def forget_token(storage_dir: Path) -> None:
+    """Disconnect: delete the stored token and clear it from the environment."""
+    try:
+        _token_file(storage_dir).unlink()
+    except FileNotFoundError:
+        pass
+    os.environ.pop("KITE_ACCESS_TOKEN", None)
+    _live_cache["value"] = None
+
+
 def _token_expires_at(storage_dir: Path) -> Optional[str]:
     f = _token_file(storage_dir)
     try:
@@ -122,11 +132,16 @@ def _fetch_live() -> Dict[str, Any]:
 async def status(request: Request) -> Dict[str, Any]:
     storage = request.app.state.settings.storage_dir
     expires = _token_expires_at(storage)
+    from api import autologin  # local import: autologin imports this module
+
+    creds = request.app.state.creds.public_view()
     return {
         "broker": "kite" if configured() else "none",
         "configured": configured(),
         "connected": bool(expires and os.getenv("KITE_ACCESS_TOKEN")),
         "token_expires_at": expires,
+        "auto_login_enabled": creds["auto_login_enabled"],
+        "last_login": autologin.last_result(),
     }
 
 
