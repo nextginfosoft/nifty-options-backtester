@@ -1,0 +1,23 @@
+# Allowlist: the image only needs the API, the model code and the seed cache.
+# (The repo is ~4 GB; none of the raw archives, docs or notebooks belong in the image.)
+*
+!api/
+!backtester/
+!config.py
+!data/*.py
+!data/nse_holidays.json
+!data/.cache_seed/
+!models/
+!pricing/
+!strategies/
+!utils/
+!frontend/package.json
+!frontend/pnpm-lock.yaml
+!frontend/index.html
+!frontend/tsconfig.json
+!frontend/vite.config.ts
+!frontend/src/
+!deploy/entrypoint.sh
+!deploy/requirements-server.txt
+**/__pycache__
+**/*.pyc

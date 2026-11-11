@@ -1,0 +1,42 @@
+name: nifty
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ENV: production
+    volumes:
+      # Ledger (SQLite), Kite token, market-data cache and models live here.
+      - nifty_data:/app/data/.cache
+    expose:
+      - "8000"          # internal only; Caddy is the single public entry point
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in deploy/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  nifty_data:
+  caddy_data:
+  caddy_config:
