@@ -1,0 +1,24 @@
+# Runtime dependencies for the hosted dashboard (trimmed from requirements.txt).
+# The ML stack is pinned to the versions the seed model pickles were created with.
+numpy==2.5.4
+pandas==3.1.1
+scipy==1.18.1
+scikit-learn==1.8.0  # matches the version the seed model pickles were saved with
+lightgbm==4.7.0
+joblib==1.6.0
+pyarrow==26.0.1
+yfinance==1.8.0
+requests>=2.31.0
+httpx>=0.27.0
+python-dateutil>=2.8.2
+python-dotenv>=1.0.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
+openpyxl>=3.1.0
+xlrd>=2.0.1
+tabulate>=0.9.0
+tzdata
+fastapi==0.162.4
+pydantic==2.14.3
+uvicorn==0.54.0
+kiteconnect>=5.0.1

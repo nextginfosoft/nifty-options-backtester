@@ -1,0 +1,12 @@
+# Caddy terminates HTTPS (automatic Let's Encrypt certificate for $DOMAIN) and proxies
+# everything to the API container, which also serves the built front end.
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	reverse_proxy api:8000
+}

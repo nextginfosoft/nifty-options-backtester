@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from backtester.position_sizer import PositionSizer
+from backtester.position_sizer import PositionSizer, _regime_from_vix
 from config import BacktestConfig
 from data.market_data import MarketDataFetcher
 from models.regime_aware_learner import RegimeAwareLearner
@@ -126,11 +126,11 @@ async def get_entry_signal() -> Dict[str, Any]:
         # Get position sizing
         equity = float(os.getenv("PAPER_INITIAL_CAPITAL", "2500000"))
         try:
-            position_sizer = PositionSizer()
+            position_sizer = PositionSizer(BacktestConfig())
             sizing = position_sizer.compute_lots(
                 equity=equity,
                 vix=vix,
-                regime=regime,
+                regime=_regime_from_vix(vix),
                 win_prob=quality_score,
                 drawdown_pct=0.0
             )

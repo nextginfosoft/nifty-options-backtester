@@ -14,8 +14,7 @@ function TrackCard({ title, track }: { title: string; track: Track }) {
       <Row k="Signal">{humanize(track.signal)}</Row>
       <Row k="Quality score">{track.quality_score == null ? "–" : pct(track.quality_score * 100)}</Row>
       <Row k="Strategy">{humanize(track.recommended_strategy) === "–" ? "none selected" : humanize(track.recommended_strategy)}</Row>
-      <Row k="Suggested lots">{track.suggested_lots ?? "–"}</Row>
-      <Row k="Capital to deploy">{inr(track.capital_to_deploy)}</Row>
+      <Row k="Sizer lots (indicative)">{track.suggested_lots ?? "–"}</Row>
       <Row k="DTE window">{track.dte_window ?? "–"}</Row>
       {track.skip_reason ? <Row k="Skip reason">{humanize(track.skip_reason)}</Row> : null}
       <Row k="Eligible">
