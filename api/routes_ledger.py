@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import date
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request, Response
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
-from api import server
+from api import live_pnl, server
 from api.ledger import Ledger, max_drawdown_pct
 
 router = APIRouter()
@@ -143,6 +145,7 @@ async def account_status(request: Request, journal_id: Optional[str] = Query(Non
         "regime": server._infer_regime(vix) if vix else None,
         "market_date": str(getattr(row, "name", "")) if row is not None else None,
         "data_state": server._state["status"],
+        "last_refresh": server._state["last_refresh"],
     }
 
 
@@ -154,18 +157,49 @@ async def list_trades(request: Request, journal_id: Optional[str] = Query(None),
     return {"count": len(trades), "trades": trades}
 
 
+_live_cache: Dict[str, Any] = {}
+LIVE_TTL_SECONDS = 5.0
+
+
+@router.get("/trades/live")
+async def live_trades(request: Request, journal_id: Optional[str] = Query(None)) -> Dict[str, Any]:
+    """Real-price P&L, exit-at-market estimate and exit-rule alerts for open trades (Kite quotes)."""
+    key = journal_id or "*"
+    hit = _live_cache.get(key)
+    if hit and time.time() - hit["at"] < LIVE_TTL_SECONDS:
+        return hit["value"]
+    open_trades = _ledger(request).list_trades(journal_id, "open")
+    now = server.now_ist()
+    if not open_trades:
+        value: Dict[str, Any] = {"ok": True, "source": "kite", "as_of": now.isoformat(timespec="seconds"),
+                                 "spot": None, "trades": []}
+    else:
+        try:
+            data = await run_in_threadpool(live_pnl.fetch_quotes, open_trades)
+        except live_pnl.LiveUnavailable as exc:
+            return {"ok": False, "reason": str(exc), "trades": []}
+        value = {
+            "ok": True, "source": "kite", "as_of": now.isoformat(timespec="seconds"), "spot": data["spot"],
+            "trades": [live_pnl.evaluate_trade(t, data["legs"], data["spot"], now.date()) for t in open_trades],
+        }
+    _live_cache[key] = {"at": time.time(), "value": value}
+    return value
+
+
 @router.post("/trades")
 async def open_trade(body: TradeOpen, request: Request) -> Dict[str, Any]:
     data = body.model_dump(mode="json")
     data["lot_size"] = body.lot_size or request.app.state.settings.lot_size
     data["legs"] = [{"action": l.action, "strike": l.strike, "option_type": l.option_type,
                      "entry_price": l.entry_price} for l in body.legs]
+    _live_cache.clear()
     return _ledger(request).open_trade(body.journal_id, data)
 
 
 @router.post("/trades/{trade_id}/close")
 async def close_trade(trade_id: str, body: TradeClose, request: Request,
                       journal_id: str = Query(...)) -> Dict[str, Any]:
+    _live_cache.clear()
     return _ledger(request).close_trade(
         journal_id, trade_id, exit_debit=body.exit_debit, exit_reason=body.exit_reason,
         exit_date=(body.exit_date or date.today()).isoformat(), exit_time_ist=body.exit_time_ist,
@@ -175,6 +209,7 @@ async def close_trade(trade_id: str, body: TradeClose, request: Request,
 
 @router.delete("/trades/{trade_id}")
 async def delete_trade(trade_id: str, request: Request, journal_id: str = Query(...)) -> Dict[str, Any]:
+    _live_cache.clear()
     _ledger(request).delete_trade(journal_id, trade_id)
     return {"deleted": trade_id}
 

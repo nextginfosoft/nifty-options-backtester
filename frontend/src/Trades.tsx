@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState, type FormEvent } from "react";
 import { api, useApi } from "./api";
-import { humanize, inr, nowIST, num, todayISO, tone } from "./format";
-import type { Journal, Leg, Recommendation, Trade } from "./types";
+import { humanize, inr, nowIST, num, pct, todayISO, tone } from "./format";
+import type { Journal, Leg, LiveTrades, Recommendation, Trade } from "./types";
 import { Card, Empty, ErrorText, Pill, Row, Stat } from "./ui";
 
 const STRATEGIES = ["put_credit_spread", "iron_condor", "call_credit_spread", "other"];
@@ -174,7 +174,7 @@ function LogTrade({ journal, onSaved }: { journal: Journal; onSaved: () => void 
 }
 
 // ---------------------------------------------------------------- close a trade
-function CloseForm({ trade, onDone, onCancel }: { trade: Trade; onDone: () => void; onCancel: () => void }) {
+function CloseForm({ trade, suggested, onDone, onCancel }: { trade: Trade; suggested: number | null; onDone: () => void; onCancel: () => void }) {
   const [debit, setDebit] = useState("");
   const [reason, setReason] = useState("profit_target");
   const [date, setDate] = useState(todayISO());
@@ -218,6 +218,9 @@ function CloseForm({ trade, onDone, onCancel }: { trade: Trade; onDone: () => vo
       <div className="actions">
         <button className="primary" disabled={busy}>{busy ? "Closing…" : "Close trade"}</button>
         <button type="button" onClick={onCancel}>Cancel</button>
+        {suggested != null ? (
+          <button type="button" onClick={() => setDebit(suggested.toFixed(2))}>Use live exit price ({num(suggested)})</button>
+        ) : null}
         {preview != null ? <span className="muted">Net P&amp;L: <strong className={`num ${tone(preview)}`}>{inr(preview)}</strong></span> : null}
       </div>
     </form>
@@ -237,6 +240,8 @@ export default function Trades({
   const jq = journal ? `journal_id=${encodeURIComponent(journal.journal_id)}` : "";
   const trades = useApi<{ trades: Trade[] }>(journal ? `/api/trades?${jq}&status=all` : null);
   const monitor = useApi<{ recommendations: Recommendation[] }>(journal ? `/api/monitor?${jq}` : null, 60000);
+  const hasOpen = (trades.data?.trades ?? []).some((t) => t.status === "open");
+  const live = useApi<LiveTrades>(journal && hasOpen ? `/api/trades/live?${jq}` : null, 15000);
   const [closing, setClosing] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -254,6 +259,7 @@ export default function Trades({
   const open = all.filter((t) => t.status === "open");
   const closed = all.filter((t) => t.status === "closed");
   const recFor = (id: string) => monitor.data?.recommendations.find((r) => r.trade_id === id);
+  const liveFor = (id: string) => live.data?.trades.find((t) => t.trade_id === id);
 
   function refresh() {
     trades.reload();
@@ -287,13 +293,20 @@ export default function Trades({
       >
         <ErrorText error={trades.error ?? rowError} />
         {monitor.error && open.length > 0 ? <div className="note">Exit monitor unavailable: {monitor.error}</div> : null}
+        {live.data?.ok && open.length > 0 ? (
+          <div className="note">Live prices via Kite · {live.data.as_of?.slice(11, 19)} IST · Nifty {num(live.data.spot)}. Exit rules are guidance only; nothing closes automatically.</div>
+        ) : null}
+        {live.data && !live.data.ok && open.length > 0 ? (
+          <div className="note">Live prices unavailable ({live.data.reason}). Showing estimates only.</div>
+        ) : null}
         {open.length === 0 ? <Empty>No open trades.</Empty> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Trade</th><th>Strategy</th><th>Legs</th><th>Entry</th><th>Credit / lots</th><th>Exit monitor</th><th /></tr></thead>
+              <thead><tr><th>Trade</th><th>Strategy</th><th>Legs</th><th>Entry</th><th>Credit / lots</th><th>Live (Kite)</th><th>ML exit view (BS estimate)</th><th /></tr></thead>
               <tbody>
                 {open.map((t) => {
                   const r = recFor(t.trade_id);
+                  const lv = liveFor(t.trade_id);
                   return (
                     <Fragment key={t.trade_id}>
                       <tr>
@@ -302,6 +315,18 @@ export default function Trades({
                         <td className="wrap">{t.legs.map(legText).join(" · ")}</td>
                         <td>{t.entry_date}<br /><span className="muted">exp {t.expiry_date}</span></td>
                         <td className="num">{num(t.entry_credit)} × {t.lots}</td>
+                        <td className="wrap">
+                          {lv?.ok ? (
+                            <>
+                              <div>Mark <strong className={`num ${tone(lv.unrealized_mark)}`}>{inr(lv.unrealized_mark)}</strong></div>
+                              <div>If closed now <strong className={`num ${tone(lv.unrealized_exit)}`}>{inr(lv.unrealized_exit)}</strong></div>
+                              <div className="muted">{pct(lv.pct_credit_captured)} of credit captured</div>
+                              {lv.alerts.map((a) => <div key={a.code} className="bad">⚠ {a.message}</div>)}
+                            </>
+                          ) : (
+                            <span className="muted">{lv ? lv.reason : live.loading ? "…" : "–"}</span>
+                          )}
+                        </td>
                         <td className="wrap">
                           {r ? (
                             <>
@@ -317,8 +342,8 @@ export default function Trades({
                         </td>
                       </tr>
                       {closing === t.trade_id ? (
-                        <tr key={`${t.trade_id}-close`}><td colSpan={7}>
-                          <CloseForm trade={t} onCancel={() => setClosing(null)} onDone={() => { setClosing(null); refresh(); }} />
+                        <tr key={`${t.trade_id}-close`}><td colSpan={8}>
+                          <CloseForm trade={t} suggested={liveFor(t.trade_id)?.exit_debit_est ?? null} onCancel={() => setClosing(null)} onDone={() => { setClosing(null); refresh(); }} />
                         </td></tr>
                       ) : null}
                     </Fragment>

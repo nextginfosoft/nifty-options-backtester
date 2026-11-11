@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Fyers symbol -> Kite quote key for the two index symbols the project asks for.
 _INDEX_MAP = {
@@ -101,6 +101,25 @@ class KiteFyersAdapter:
         if not d:
             return _err(-1, "Kite returned no quotes for the requested symbols")
         return {"s": "ok", "d": d}
+
+    def leg_quotes(self, legs: List[Tuple[date, float, str]]) -> Dict[str, Any]:
+        """Live quotes for exact option legs plus the Nifty spot.
+
+        ``legs`` is a list of (expiry, strike, "CE"/"PE"). Returns ``{"spot": float|None,
+        "legs": {(expiry, strike, type): {"ltp", "bid", "ask", "oi", "volume"}}}``; legs with no matching
+        instrument (e.g. already expired) are simply absent. Raises on API errors (the caller maps them).
+        """
+        symbol_for = {(r["expiry"], float(r["strike"]), r["instrument_type"]): r["tradingsymbol"]
+                      for r in self._nfo_nifty()}
+        wanted: Dict[Tuple[date, float, str], str] = {}
+        for expiry, strike, opt_type in legs:
+            sym = symbol_for.get((expiry, float(strike), opt_type))
+            if sym:
+                wanted["NFO:" + sym] = (expiry, float(strike), opt_type)
+        raw = self._raw_quotes(["NSE:NIFTY 50"] + list(wanted))
+        out = {wanted[k]: self._values(raw[k]) for k in wanted if k in raw}
+        spot = (raw.get("NSE:NIFTY 50") or {}).get("last_price")
+        return {"spot": spot, "legs": out}
 
     def optionchain(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Fyers ``optionchain`` for NIFTY.

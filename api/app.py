@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from api import auth, autologin, broker_routes, credentials_routes, routes_ledger, server
+from api import auth, autologin, broker_routes, credentials_routes, datarefresh, routes_ledger, server
 from api.credentials import CredentialError, CredentialStore
 from api.ledger import Ledger, LedgerError, NotFound
 from api.settings import Settings, load_settings
@@ -47,8 +47,9 @@ def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] 
             logger.error("Stored Zerodha credentials unusable: %s", exc)
         task = asyncio.create_task(asyncio.to_thread(server.load_all)) if load_market else None
         sched = asyncio.create_task(autologin.scheduler(app)) if run_scheduler else None
+        refresher = asyncio.create_task(datarefresh.scheduler()) if run_scheduler else None
         yield
-        for t in (task, sched):
+        for t in (task, sched, refresher):
             if t and not t.done():
                 t.cancel()
 

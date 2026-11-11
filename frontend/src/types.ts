@@ -4,7 +4,19 @@ export interface Health {
   market_data_loaded: boolean;
   models_loaded: boolean;
   errors: string[];
+  data_as_of: string | null;
+  last_refresh: RefreshResult | null;
   timestamp: string;
+}
+
+export interface RefreshResult {
+  at: string;
+  ok: boolean;
+  trigger: string;
+  latest_date: string;
+  rows: number;
+  changed: boolean;
+  message: string;
 }
 
 export interface Journal {
@@ -41,6 +53,7 @@ export interface AccountStatus {
   regime: string | null;
   market_date: string | null;
   data_state: string;
+  last_refresh: RefreshResult | null;
 }
 
 export interface Track {
@@ -156,6 +169,45 @@ export interface CredentialsView {
   last_login: LoginResult | null;
   auto_login_attempts_today: number;
   auto_login_blocked: boolean;
+}
+
+export interface LiveLeg {
+  action: "BUY" | "SELL";
+  strike: number;
+  option_type: "CE" | "PE";
+  entry_price: number;
+  ltp: number | null;
+  bid: number | null;
+  ask: number | null;
+}
+
+export interface LiveAlert {
+  code: string;
+  message: string;
+}
+
+export interface LiveTrade {
+  trade_id: string;
+  journal_id: string;
+  strategy: string;
+  ok: boolean;
+  reason?: string;
+  legs: LiveLeg[];
+  mark_debit?: number;
+  exit_debit_est?: number;
+  unrealized_mark?: number;
+  unrealized_exit?: number;
+  pct_credit_captured?: number | null;
+  alerts: LiveAlert[];
+}
+
+export interface LiveTrades {
+  ok: boolean;
+  reason?: string;
+  source?: string;
+  as_of?: string;
+  spot?: number | null;
+  trades: LiveTrade[];
 }
 
 export interface Live {
