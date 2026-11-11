@@ -226,7 +226,7 @@ def get_best_expiry_for_dte(from_date: date, target_dte: int) -> tuple[date, int
 
 def format_expiry_label(expiry: date) -> str:
     """Human-readable expiry label, e.g. '28 Apr 2026'."""
-    return expiry.strftime("%-d %b %Y")
+    return f"{expiry.day} {expiry.strftime('%b %Y')}"  # portable (no %-d on Windows)
 
 
 # ── Weekly helpers ──────────────────────────────────────────────────────────
