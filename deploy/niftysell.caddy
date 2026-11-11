@@ -1,0 +1,14 @@
+# Site block to ADD to your existing Caddy configuration. It only adds this hostname;
+# it does not change any other site. Upstream is the localhost-only port from
+# docker-compose.shared-proxy.yml (APP_PORT, default 18080). If Caddy runs in Docker and uses
+# the caddy-network override, replace the upstream with:  niftysell-api:8000
+niftysell.nextginfosoft.com {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	reverse_proxy 127.0.0.1:18080
+}

@@ -109,6 +109,30 @@ Read this before enabling it:
 The volume name is `<project>_<volume>`; check with `docker volume ls` if the backup command cannot find it.
 Export trades any time from the **Trades** tab (CSV in the repository's `TRADES.csv` layout).
 
+## 7b. If the server already runs a reverse proxy (shared VPS)
+If something else already owns ports 80/443 (for example an existing Caddy), do **not** use `docker-compose.yml`: its
+Caddy would fight for those ports. Use the shared-proxy variant, which runs only the app on `127.0.0.1:18080` with its own
+project name, container, network and volume, plus CPU/memory caps. It never publishes a public port and does not
+touch other containers.
+
+```bash
+# on the server, from the unpacked bundle's deploy/ directory, with .env copied in
+sh preflight.sh                                     # READ-ONLY survey; changes nothing
+docker compose -f docker-compose.shared-proxy.yml up -d --build
+curl -s http://127.0.0.1:18080/api/health           # wait for "state":"ready"
+sh add-caddy-site.sh                                # DRY RUN: shows exactly what it would add
+sh add-caddy-site.sh --apply                        # backup, append one site block, validate, graceful reload
+```
+- `add-caddy-site.sh` adds only a `niftysell.nextginfosoft.com { ... reverse_proxy 127.0.0.1:18080 }` block. It validates
+  first, restores the backup if validation or reload fails, and uses a graceful reload so other sites keep serving.
+- If your Caddy runs in Docker, pass `--docker-container NAME` and `--caddyfile <host path of the mounted file>`. If it
+  cannot reach host localhost, use `docker-compose.shared-proxy.caddy-network.yml` (attaches only our container to
+  Caddy's network) and `--upstream niftysell-api:8000`.
+- Cloudflare: keep the record **DNS-only (grey cloud)** so Caddy can obtain its certificate; if you enable the proxy, set
+  SSL/TLS mode to **Full (strict)**.
+- Roll back: `docker compose -f docker-compose.shared-proxy.yml down` (add `-v` to also delete the data volume) and restore
+  the printed Caddyfile backup, then reload Caddy.
+
 ## 8. Security notes
 - Single-user login with a signed, HttpOnly cookie (Secure over HTTPS), a CSRF header on all writes, and a
   5-attempt / 15-minute lockout per IP. Use a long password.

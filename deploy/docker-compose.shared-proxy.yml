@@ -1,0 +1,47 @@
+# For a server that ALREADY runs a reverse proxy (Caddy/nginx) on ports 80/443.
+#
+# Starts ONLY the app, bound to 127.0.0.1 (never published to the internet), with its own
+# project name, container, image, network and volume so it cannot collide with, restart or
+# modify any other application. Your existing proxy gets one extra site that forwards
+# niftysell.nextginfosoft.com to this port (see niftysell.caddy and DEPLOY.md).
+#
+#   docker compose -f docker-compose.shared-proxy.yml up -d --build
+name: niftysell
+
+services:
+  api:
+    container_name: niftysell-api
+    image: niftysell-api:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ENV: production
+    volumes:
+      - niftysell_data:/app/data/.cache
+    ports:
+      - "127.0.0.1:${APP_PORT:-18080}:8000"   # localhost only
+    networks:
+      - niftysell
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Keep this app from starving neighbouring apps on a shared server.
+    mem_limit: 3g
+    cpus: 2
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  niftysell:
+    name: niftysell_net
+
+volumes:
+  niftysell_data:
+    name: niftysell_data

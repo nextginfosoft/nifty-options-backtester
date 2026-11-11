@@ -1,0 +1,16 @@
+# OPTIONAL override: use only if your existing Caddy runs in a Docker container and cannot
+# reach 127.0.0.1 on the host. It attaches OUR container to Caddy's existing Docker network
+# (the Caddy container itself is not changed). Set CADDY_NETWORK in .env to that network's
+# name (preflight.sh prints it), then in Caddy use:  reverse_proxy niftysell-api:8000
+#
+#   docker compose -f docker-compose.shared-proxy.yml -f docker-compose.shared-proxy.caddy-network.yml up -d
+services:
+  api:
+    networks:
+      - niftysell
+      - caddy_proxy
+
+networks:
+  caddy_proxy:
+    external: true
+    name: ${CADDY_NETWORK:?Set CADDY_NETWORK in deploy/.env}
