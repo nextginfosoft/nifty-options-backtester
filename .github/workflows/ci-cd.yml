@@ -1,0 +1,170 @@
+name: CI/CD
+
+# Pull requests: run the tests, build the front end and check the Docker image builds.
+# Pushes to main that change the app (see paths): the same checks, then build the image and deploy it to
+# https://niftysell.nextginfosoft.com. The deploy streams the image over SSH to a restricted key whose only
+# permitted action is /usr/local/sbin/niftysell-deploy (see deploy/server/niftysell-deploy). That script
+# restarts only the niftysell-api container, health-checks it, and rolls back on failure.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - "backtester/**"
+      - "models/**"
+      - "strategies/**"
+      - "pricing/**"
+      - "utils/**"
+      - "frontend/**"
+      - "data/*.py"
+      - "data/nse_holidays.json"
+      - "data/.cache_seed/**"
+      - "config.py"
+      - "deploy/Dockerfile"
+      - "deploy/entrypoint.sh"
+      - "deploy/requirements-server.txt"
+      - ".dockerignore"
+      - ".github/workflows/ci-cd.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  SITE: niftysell.nextginfosoft.com
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: deploy/requirements-server.txt
+      - name: System libraries (LightGBM needs OpenMP)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
+      - name: Install dependencies
+        run: pip install -r deploy/requirements-server.txt pytest
+      - name: Dashboard backend tests
+        run: >
+          python -m pytest -q -p no:cacheprovider
+          tests/test_dashboard_api.py tests/test_kite_credentials.py
+          tests/test_live_refresh.py tests/test_kite_adapter.py
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Type-check and build
+        run: pnpm build
+
+  image-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          tags: niftysell-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: [backend-tests, frontend]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'nextginfosoft/nifty-options-backtester'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: production
+    concurrency:
+      group: niftysell-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          load: true
+          tags: niftysell-api:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ] || { echo "Deploy secrets are not configured"; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Ship image and deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          docker save niftysell-api:local | gzip -1 | ssh \
+            -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy ${GITHUB_SHA}"
+      - name: Verify the public site
+        run: |
+          for i in $(seq 1 20); do
+            body="$(curl -fsS -m 10 "https://${SITE}/api/health" || true)"
+            if printf '%s' "$body" | grep -q '"status":"ok"'; then
+              echo "Site healthy: $body"
+              echo "Deployed ${GITHUB_SHA} to https://${SITE}" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "The public site did not report healthy" >&2
+          exit 1
+      - name: Remove SSH material
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts

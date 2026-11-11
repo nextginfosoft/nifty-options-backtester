@@ -141,7 +141,44 @@ sh add-caddy-site.sh --apply                        # backup, append one site bl
 - Roll back: `docker compose -f docker-compose.shared-proxy.yml down` (add `-v` to also delete the data volume) and restore
   the printed Caddyfile backup, then reload Caddy.
 
-## 8. Security notes
+## 8. Automatic deployment (GitHub Actions)
+`.github/workflows/ci-cd.yml` runs on every pull request (backend tests, front-end type-check and build, Docker image build)
+and, when app code changes on `main`, deploys it to https://niftysell.nextginfosoft.com.
+
+How a deploy works:
+1. GitHub builds the image and streams it over SSH (`docker save | gzip | ssh ... "deploy <sha>"`).
+2. The server runs ONLY `/usr/local/sbin/niftysell-deploy` (source: `deploy/server/niftysell-deploy`). It loads the image,
+   recreates just the `niftysell-api` container, waits for `/api/health`, and **rolls back to the previous image** if it does
+   not come up. It never touches other containers, networks, volumes, the proxy, or runs a global image prune.
+3. The workflow then checks the public URL. Deploys are serialized, so two pushes never deploy at once.
+
+Docs-only and CLI-only changes (paths outside the app, front end and image inputs) do not trigger a deploy.
+
+One-time setup (the pipeline will fail at "Configure SSH" until this is done):
+1. **Install the server script** (root): `cat deploy/server/niftysell-deploy > /usr/local/sbin/niftysell-deploy`, then
+   `chown root:root` and `chmod 755` it.
+2. **Create a deploy key** (anywhere, no passphrase): `ssh-keygen -t ed25519 -N "" -C github-actions-niftysell-deploy -f niftysell_deploy`.
+3. **Authorise it with a forced command** by appending this single line to `/root/.ssh/authorized_keys` (back the file up first):
+   `restrict,command="/usr/local/sbin/niftysell-deploy" <contents of niftysell_deploy.pub>`.
+   With `restrict` and `command=`, that key cannot open a shell or run anything except the deploy script.
+4. **GitHub**: create an environment named `production` (Settings, Environments) and add these environment secrets:
+   `DEPLOY_SSH_KEY` (the private key file), `DEPLOY_KNOWN_HOSTS` (output of `ssh-keyscan -t ed25519 <host>`, after checking
+   the fingerprint against `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server), `DEPLOY_HOST`, `DEPLOY_USER`.
+   Delete the private key file from your machine afterwards.
+
+Recommended protections, because a merge to `main` runs code on a shared server:
+- Branch protection on `main`: require a pull request and passing checks.
+- Add required reviewers to the `production` environment if you want a manual approval before each deploy.
+- Note the container joins the shared `edge` Docker network (like the other apps), so treat who can merge as who can deploy.
+
+What is NOT automated: edits to `deploy/.env` on the server (new settings need to be added there by hand), changes to the
+two compose files, and the Caddy site entry. The pipeline ships the image only.
+
+Manual rollback (on the server): `docker tag niftysell-api:previous niftysell-api:local`, then from `/opt/niftysell/deploy`:
+`docker compose -f docker-compose.shared-proxy.yml -f docker-compose.shared-proxy.caddy-network.yml up -d --no-build`.
+`/opt/niftysell/DEPLOYED_SHA` records the commit that is currently deployed.
+
+## 9. Security notes
 - Single-user login with a signed, HttpOnly cookie (Secure over HTTPS), a CSRF header on all writes, and a
   5-attempt / 15-minute lockout per IP. Use a long password.
 - API docs (`/api/docs`) are disabled in production.

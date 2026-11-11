@@ -1,0 +1,95 @@
+#!/bin/bash
+# Forced-command deploy for the niftysell dashboard. Install as /usr/local/sbin/niftysell-deploy
+# (root:root, 0755) and bind the GitHub Actions key to it in /root/.ssh/authorized_keys:
+#
+#   restrict,command="/usr/local/sbin/niftysell-deploy" ssh-ed25519 AAAA... github-actions-niftysell-deploy
+#
+# The pipeline runs:  docker save niftysell-api:local | gzip | ssh <host> "deploy <git-sha>"
+# so this script receives a gzipped image on stdin. It ONLY touches niftysell resources:
+#   - loads the image tagged niftysell-api:local
+#   - recreates the niftysell-api container (compose project "niftysell"), nothing else
+#   - waits for /api/health; on failure restores the previous image and exits non-zero
+# It never prunes images globally, never touches other containers, networks, volumes or the proxy.
+set -euo pipefail
+umask 077
+
+APP_DIR="${APP_DIR:-/opt/niftysell}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:18080/api/health}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
+LOCK="${LOCK:-/var/lock/niftysell-deploy.lock}"
+IMAGE="niftysell-api:local"
+PREVIOUS="niftysell-api:previous"
+
+log() { printf '[niftysell-deploy] %s\n' "$*" >&2; }
+
+# ---- the only command this key may run: "deploy <git-sha>" ----------------------------------
+case "${SSH_ORIGINAL_COMMAND:-}" in
+  "deploy "*) SHA="${SSH_ORIGINAL_COMMAND#deploy }" ;;
+  *) log "usage: deploy <git-sha> (image on stdin)"; exit 2 ;;
+esac
+if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{7,40}$'; then
+  log "refusing: argument is not a git sha"; exit 2
+fi
+
+# ---- one deploy at a time ---------------------------------------------------------------------
+exec 9>"$LOCK"
+if ! flock -n 9; then log "another deploy is already running"; exit 3; fi
+
+cd "$APP_DIR/deploy"
+COMPOSE=(docker compose -f docker-compose.shared-proxy.yml -f docker-compose.shared-proxy.caddy-network.yml)
+
+image_id() { docker image inspect "$1" --format '{{.Id}}' 2>/dev/null || true; }
+
+OLD_PREVIOUS_ID="$(image_id "$PREVIOUS")"
+CURRENT_ID="$(image_id "$IMAGE")"
+if [ -n "$CURRENT_ID" ]; then
+  docker tag "$IMAGE" "$PREVIOUS"          # remember what is running, for rollback
+fi
+
+log "receiving and loading image for $SHA ..."
+gunzip | docker load >&2
+NEW_ID="$(image_id "$IMAGE")"
+[ -n "$NEW_ID" ] || { log "image $IMAGE was not found after load"; exit 1; }
+log "loaded $NEW_ID"
+
+rollback() {
+  log "ROLLING BACK to the previous image"
+  if [ -n "$CURRENT_ID" ]; then
+    docker tag "$PREVIOUS" "$IMAGE"
+    "${COMPOSE[@]}" up -d --no-build >&2 || log "rollback compose up failed; check the server"
+    [ "$NEW_ID" != "$CURRENT_ID" ] && docker image rm "$NEW_ID" >/dev/null 2>&1 || true
+  else
+    log "there was no previous image to roll back to"
+  fi
+}
+
+log "recreating niftysell-api only ..."
+if ! "${COMPOSE[@]}" up -d --no-build >&2; then
+  log "compose up failed"; rollback; exit 1
+fi
+
+log "waiting for health (up to ${HEALTH_TIMEOUT}s) ..."
+deadline=$((SECONDS + HEALTH_TIMEOUT))
+state=""
+while [ "$SECONDS" -lt "$deadline" ]; do
+  body="$(curl -fsS -m 4 "$HEALTH_URL" 2>/dev/null || true)"
+  state="$(printf '%s' "$body" | grep -o '"state":"[a-z]*"' | head -1 || true)"
+  case "$state" in
+    '"state":"ready"'|'"state":"degraded"') break ;;   # the API is up; "degraded" = e.g. Yahoo was unreachable
+  esac
+  sleep 3
+done
+case "$state" in
+  '"state":"ready"') log "healthy: $state" ;;
+  '"state":"degraded"') log "WARNING: app is up but degraded (data or model load issue); not rolling back" ;;
+  *) log "did not become healthy in time (last: ${state:-no response})"; rollback; exit 1 ;;
+esac
+
+printf '%s %s\n' "$SHA" "$(date -u +%FT%TZ)" > "$APP_DIR/DEPLOYED_SHA"
+
+# Housekeeping limited to OUR images by id: drop the image that was "previous" before this run
+# (unless it is still in use), so repeated deploys do not fill the disk. Never a global prune.
+if [ -n "$OLD_PREVIOUS_ID" ] && [ "$OLD_PREVIOUS_ID" != "$NEW_ID" ] && [ "$OLD_PREVIOUS_ID" != "$CURRENT_ID" ]; then
+  docker image rm "$OLD_PREVIOUS_ID" >/dev/null 2>&1 && log "removed old image ${OLD_PREVIOUS_ID:0:19}" || true
+fi
+log "deployed $SHA"
