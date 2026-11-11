@@ -2,3 +2,4 @@ deploy/entrypoint.sh text eol=lf
 deploy/Dockerfile text eol=lf
 deploy/Caddyfile text eol=lf
 deploy/docker-compose.yml text eol=lf
+deploy/*.sh text eol=lf

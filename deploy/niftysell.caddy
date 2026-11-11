@@ -1,0 +1,9 @@
+# Site block added to the existing Caddy (same convention as the other sites). Upstream is our
+# container on the shared Docker network (docker-compose.shared-proxy.caddy-network.yml).
+# If Caddy runs on the host instead, use: reverse_proxy 127.0.0.1:18080
+# >>> niftysell
+niftysell.nextginfosoft.com {
+	encode zstd gzip
+	reverse_proxy niftysell-api:8000
+}
+# <<< niftysell
