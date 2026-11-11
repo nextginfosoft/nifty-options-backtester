@@ -125,9 +125,17 @@ sh add-caddy-site.sh --apply                        # backup, append one site bl
 ```
 - `add-caddy-site.sh` adds only a `niftysell.nextginfosoft.com { ... reverse_proxy 127.0.0.1:18080 }` block. It validates
   first, restores the backup if validation or reload fails, and uses a graceful reload so other sites keep serving.
-- If your Caddy runs in Docker, pass `--docker-container NAME` and `--caddyfile <host path of the mounted file>`. If it
-  cannot reach host localhost, use `docker-compose.shared-proxy.caddy-network.yml` (attaches only our container to
-  Caddy's network) and `--upstream niftysell-api:8000`.
+- If your Caddy runs in Docker (the common case), start with BOTH compose files so only our container joins the proxy's
+  existing network (set `CADDY_NETWORK` in `.env`, e.g. `edge`), and pass the container and mounted file to the script:
+
+  ```bash
+  docker compose -f docker-compose.shared-proxy.yml -f docker-compose.shared-proxy.caddy-network.yml up -d --no-build
+  sh add-caddy-site.sh --docker-container edge-caddy --caddyfile /opt/edge/Caddyfile        # dry run
+  sh add-caddy-site.sh --apply --docker-container edge-caddy --caddyfile /opt/edge/Caddyfile
+  ```
+  The default upstream is `niftysell-api:8000`. Use `--upstream 127.0.0.1:18080` only for a host-level Caddy.
+- To avoid building on a shared server, build the image on your machine and ship it:
+  `docker save niftysell-api:local | gzip | ssh root@SERVER 'gunzip | docker load'`, then use `up -d --no-build`.
 - Cloudflare: keep the record **DNS-only (grey cloud)** so Caddy can obtain its certificate; if you enable the proxy, set
   SSL/TLS mode to **Full (strict)**.
 - Roll back: `docker compose -f docker-compose.shared-proxy.yml down` (add `-v` to also delete the data volume) and restore

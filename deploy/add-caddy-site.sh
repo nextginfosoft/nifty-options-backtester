@@ -9,14 +9,14 @@
 #   sh add-caddy-site.sh [--apply] [--caddyfile /etc/caddy/Caddyfile] [--docker-container NAME] [--upstream HOST:PORT]
 #
 # systemd Caddy (default):  validate/reload with the caddy binary.
-# Docker Caddy:             pass --docker-container NAME; the Caddyfile path is then the HOST path of the
+# Docker Caddy (e.g. edge-caddy): pass --docker-container NAME; the Caddyfile path is then the HOST path of the
 #                           mounted file (see preflight.sh) and validate/reload run via docker exec.
 # Override commands for unusual setups: CADDY_VALIDATE_CMD, CADDY_RELOAD_CMD.
 set -u
 
 CADDYFILE="/etc/caddy/Caddyfile"
 DOMAIN="niftysell.nextginfosoft.com"
-UPSTREAM="127.0.0.1:18080"
+UPSTREAM="niftysell-api:8000"
 CONTAINER=""
 APPLY=0
 
@@ -40,18 +40,12 @@ if grep -q "^[[:space:]]*${DOMAIN}[[:space:],{]" "$CADDYFILE" || grep -q "^${DOM
 fi
 
 BLOCK="
-# --- niftysell dashboard (added by add-caddy-site.sh) ---
+# >>> niftysell
 ${DOMAIN} {
 	encode zstd gzip
-
-	header {
-		Strict-Transport-Security \"max-age=31536000; includeSubDomains\"
-		-Server
-	}
-
 	reverse_proxy ${UPSTREAM}
 }
-# --- end niftysell ---
+# <<< niftysell
 "
 
 if [ -n "$CONTAINER" ]; then
@@ -77,7 +71,7 @@ if [ "$APPLY" != 1 ]; then
   exit 0
 fi
 
-BACKUP="${CADDYFILE}.bak.$(date +%Y%m%d%H%M%S)"
+BACKUP="${CADDYFILE}.bak-niftysell-$(date +%Y%m%d-%H%M%S)"
 cp -p "$CADDYFILE" "$BACKUP" || { echo "could not create backup" >&2; exit 1; }
 printf '%s\n' "$BLOCK" >> "$CADDYFILE"
 
