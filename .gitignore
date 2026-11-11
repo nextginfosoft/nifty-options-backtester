@@ -80,3 +80,6 @@ Thumbs.db
 docs/_build/
 site/
 logs/
+
+# Dashboard front end entry point (the *.html rule above would otherwise hide it)
+!frontend/index.html
