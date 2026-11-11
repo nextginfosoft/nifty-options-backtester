@@ -586,6 +586,7 @@ class ExitStrategyEngine:
             "_saved_at": dt_module.datetime.now().isoformat(),
             "exit_classifier": self.exit_classifier,
             "exit_feature_importance": getattr(self, "exit_feature_importance", {}),
+            "exit_feature_cols": list(getattr(self, "exit_feature_cols", []) or []),
             "is_trained": self.is_trained,
             "period_metadata": period_metadata.__dict__ if period_metadata else None,
         }
@@ -624,6 +625,12 @@ class ExitStrategyEngine:
         engine.exit_classifier = state["exit_classifier"]
         engine.exit_feature_importance = state.get("exit_feature_importance", {})
         engine.is_trained = state["is_trained"]
+        # Older caches did not store the feature columns; LightGBM keeps them on the fitted model.
+        engine.exit_feature_cols = list(
+            state.get("exit_feature_cols")
+            or getattr(engine.exit_classifier, "feature_name_", None)
+            or []
+        )
         engine.period_metadata = period_metadata
         return engine
 
