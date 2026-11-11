@@ -7,11 +7,14 @@ and the UI can show a "loading" state instead of the process failing to start.
 
 import logging
 import os
+import threading
 import traceback
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from backtester.position_sizer import PositionSizer, _regime_from_vix
 from config import BacktestConfig
@@ -30,6 +33,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()          # protected routes (mounted under /api with auth)
 public_router = APIRouter()   # /api/health only
 
+IST = ZoneInfo("Asia/Kolkata")
+
 _state: Dict[str, Any] = {
     "market_df": None,
     "latest_row": None,
@@ -37,35 +42,90 @@ _state: Dict[str, Any] = {
     "market_fetcher": None,
     "status": "idle",         # idle | loading | ready | degraded
     "errors": [],
+    "last_refresh": None,     # {at, ok, trigger, latest_date, rows, changed, message}
 }
+_refresh_lock = threading.Lock()
 
 
-def load_market_data() -> None:
-    fetcher = MarketDataFetcher(start_date=date(2009, 1, 1), end_date=date.today())
-    _state["market_fetcher"] = fetcher
-    _state["market_df"] = fetcher.build_combined_dataset()
-    _state["latest_row"] = _state["market_df"].iloc[-1]
+def now_ist() -> datetime:
+    return datetime.now(IST)
 
 
-def load_models() -> None:
-    df = _state["market_df"]
-    _state["models"]["entry_model"] = RegimeAwareLearner.load(df)
-    _state["models"]["exit_model"] = ExitStrategyEngine.load(df)
+def data_end_date(now: Optional[datetime] = None) -> date:
+    """End date for the market-data fetch: today's date in IST.
+
+    The fetcher deliberately never includes today's bar (futures, FX and European indices only have a
+    partial bar until later), so the newest data is always the previous completed session. This keeps the
+    dashboard consistent with how the models and the CLI were built.
+    """
+    return (now or now_ist()).date()
+
+
+def _build_market() -> Tuple[Any, Any, Any]:
+    fetcher = MarketDataFetcher(start_date=date(2009, 1, 1), end_date=data_end_date())
+    df = fetcher.build_combined_dataset()
+    return fetcher, df, df.iloc[-1]
+
+
+def _build_models(df) -> Dict[str, Any]:
+    # NOTE: both loaders add feature columns to ``df`` in place, so the latest row is taken BEFORE this runs.
+    return {"entry_model": RegimeAwareLearner.load(df), "exit_model": ExitStrategyEngine.load(df)}
 
 
 def load_all() -> None:
     """Blocking loader; run it in a worker thread. Failures degrade, never crash the app."""
     _state["status"] = "loading"
     _state["errors"] = []
-    for name, fn in (("market data", load_market_data), ("models", load_models)):
+    try:
+        logger.info("Loading market data...")
+        fetcher, df, row = _build_market()
+        _state.update(market_fetcher=fetcher, market_df=df, latest_row=row)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Loading market data failed: %s %s", exc, traceback.format_exc())
+        _state["errors"].append(f"market data: {exc}")
+    if _state["market_df"] is not None:
         try:
-            logger.info("Loading %s...", name)
-            fn()
+            logger.info("Loading models...")
+            _state["models"].update(_build_models(_state["market_df"]))
         except Exception as exc:  # noqa: BLE001
-            logger.error("Loading %s failed: %s\n%s", name, exc, traceback.format_exc())
-            _state["errors"].append(f"{name}: {exc}")
+            logger.error("Loading models failed: %s %s", exc, traceback.format_exc())
+            _state["errors"].append(f"models: {exc}")
     _state["status"] = "ready" if not _state["errors"] else "degraded"
     logger.info("Startup load finished: %s", _state["status"])
+
+
+class RefreshBusy(RuntimeError):
+    pass
+
+
+def refresh_blocking(trigger: str = "manual") -> Dict[str, Any]:
+    """Re-fetch market data and rebuild the models on it, then swap both in together.
+
+    The old data stays in service if anything fails. Only one refresh runs at a time.
+    """
+    if not _refresh_lock.acquire(blocking=False):
+        raise RefreshBusy("A data refresh is already running")
+    previous = getattr(_state["latest_row"], "name", None)
+    try:
+        fetcher, df, row = _build_market()
+        models = _build_models(df)
+        _state.update(market_fetcher=fetcher, market_df=df, latest_row=row)
+        _state["models"].update(models)
+        if _state["status"] != "loading":
+            _state["status"], _state["errors"] = "ready", []
+        latest = getattr(row, "name", None)
+        result = {"at": now_ist().isoformat(timespec="seconds"), "ok": True, "trigger": trigger,
+                  "latest_date": str(latest)[:10], "rows": int(len(df)),
+                  "changed": latest != previous, "message": "Market data refreshed"}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Data refresh failed: %s %s", exc, traceback.format_exc())
+        result = {"at": now_ist().isoformat(timespec="seconds"), "ok": False, "trigger": trigger,
+                  "latest_date": str(getattr(_state["latest_row"], "name", ""))[:10], "rows": 0,
+                  "changed": False, "message": f"Refresh failed ({exc.__class__.__name__}); keeping previous data"}
+    finally:
+        _refresh_lock.release()
+    _state["last_refresh"] = result
+    return result
 
 
 def _require_data() -> None:
@@ -234,37 +294,15 @@ async def monitor_open_trades(request: Request, journal_id: Optional[str] = Quer
 
 @router.post("/market/refresh")
 async def refresh_market_data() -> Dict[str, Any]:
-    """Force reload of market data cache."""
+    """Re-fetch market data now (also runs automatically each trading day at ~08:45 IST)."""
     try:
-        logger.info("Refreshing market data...")
-        market_fetcher = _state.get("market_fetcher")
-        if not market_fetcher:
-            market_fetcher = MarketDataFetcher(start_date=date(2009, 1, 1), end_date=date.today())
-            _state["market_fetcher"] = market_fetcher
+        result = await run_in_threadpool(refresh_blocking, "manual")
+    except RefreshBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if not result["ok"]:
+        raise HTTPException(status_code=502, detail=result["message"])
+    return result
 
-        _state["market_df"] = market_fetcher.build_combined_dataset()
-        _state["latest_row"] = _state["market_df"].iloc[-1]
-
-        latest_date = getattr(_state["latest_row"], "name", date.today())
-        num_rows = len(_state["market_df"])
-
-        logger.info(f"✓ Market data refreshed: {num_rows} rows, latest date {latest_date}")
-
-        return {
-            "status": "refreshed",
-            "latest_date": str(latest_date),
-            "rows": num_rows
-        }
-
-    except Exception as e:
-        logger.error(f"Error refreshing market data: {e}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
-# Health Check Endpoint
-# ============================================================================
 
 # ============================================================================
 # Health (public)
@@ -278,6 +316,8 @@ async def health_check() -> Dict[str, Any]:
         "market_data_loaded": _state["latest_row"] is not None,
         "models_loaded": len(_state["models"]) == 2,
         "errors": _state["errors"],
+        "data_as_of": str(getattr(_state["latest_row"], "name", ""))[:10] or None,
+        "last_refresh": _state["last_refresh"],
         "timestamp": datetime.now().isoformat(timespec="seconds"),
     }
 

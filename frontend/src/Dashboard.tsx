@@ -1,6 +1,7 @@
-import { useApi } from "./api";
+import { useState } from "react";
+import { api, useApi } from "./api";
 import { humanize, inr, num, pct, tone } from "./format";
-import type { AccountStatus, Health, Signal, Track } from "./types";
+import type { AccountStatus, Health, RefreshResult, Signal, Track } from "./types";
 import { Banner, Card, Empty, Pill, Row, Stat } from "./ui";
 
 function TrackCard({ title, track }: { title: string; track: Track }) {
@@ -32,6 +33,50 @@ function TrackCard({ title, track }: { title: string; track: Track }) {
   );
 }
 
+function DataCard({ health, onRefreshed }: { health: Health | null; onRefreshed: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<RefreshResult | null>(null);
+  const last = done ?? health?.last_refresh ?? null;
+
+  async function refresh() {
+    setBusy(true);
+    setError(null);
+    try {
+      setDone(await api<RefreshResult>("/api/market/refresh", { method: "POST" }));
+      onRefreshed();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card
+      title="Market data"
+      actions={<button onClick={refresh} disabled={busy || health?.state === "loading"}>{busy ? "Refreshing…" : "Refresh data"}</button>}
+    >
+      <Row k="Data as of (last completed session)">{health?.data_as_of ?? "–"}</Row>
+      <Row k="Last refresh">
+        {last ? (
+          <>
+            <Pill tone={last.ok ? "good" : "bad"}>{last.ok ? (last.changed ? "new data" : "up to date") : "failed"}</Pill>{" "}
+            <span className="muted">{last.trigger} · {new Date(last.at).toLocaleString()}</span>
+          </>
+        ) : (
+          <span className="muted">since the server started</span>
+        )}
+      </Row>
+      <p className="note" style={{ marginBottom: 0 }}>
+        Refreshes automatically each trading day at about 08:45 IST, before the 11:00–13:00 entry window, and loads the previous
+        completed session. Today's own bar is never used. A failed refresh keeps the previous data.
+      </p>
+      {error ? <div className="error-text" role="alert">{error}</div> : null}
+    </Card>
+  );
+}
+
 export default function Dashboard({ journalId, health }: { journalId: string; health: Health | null }) {
   const q = journalId ? `?journal_id=${encodeURIComponent(journalId)}` : "";
   const status = useApi<AccountStatus>(`/api/status${q}`, 60000);
@@ -57,6 +102,8 @@ export default function Dashboard({ journalId, health }: { journalId: string; he
             : "Outside the 11:00–13:00 IST entry window. Signals are informational only."}
         </Banner>
       ) : null}
+
+      <DataCard health={health} onRefreshed={() => { status.reload(); signal.reload(); }} />
 
       <section className="stats">
         <Stat label="Nifty spot" value={num(s?.spot_now)} sub={s?.market_date ? `as of ${s.market_date.slice(0, 10)}` : "waiting for data"} />
