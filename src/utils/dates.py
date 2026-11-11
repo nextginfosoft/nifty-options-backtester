@@ -13,7 +13,7 @@ def parse_nse_date(value: str) -> date:
 
 
 def parse_cdsl_archive_input(value: date) -> str:
-    return value.strftime("%B %-d, %Y")
+    return f"{value.strftime('%B')} {value.day}, {value.year}"  # portable (no %-d on Windows)
 
 
 def month_iter(start_year: int, end_year: int) -> list[tuple[int, int]]:

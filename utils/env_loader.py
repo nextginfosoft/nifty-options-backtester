@@ -27,3 +27,20 @@ def load_env(base_dir: Optional[Path] = None) -> None:
         load_dotenv(env_file, override=True)
     if local_file.is_file():
         load_dotenv(local_file, override=False)
+    _alias_kite_credentials()
+
+
+def _alias_kite_credentials() -> None:
+    """With ``BROKER=kite``, expose KITE_* under the FYERS_* names the live-data code reads.
+
+    The call sites only check that these are non-empty before building the client;
+    ``data.kite_adapter`` reads KITE_* directly. Values are never printed.
+    """
+    import os
+
+    if (os.getenv("BROKER") or "").strip().lower() != "kite":
+        return
+    if os.getenv("KITE_API_KEY"):
+        os.environ["FYERS_CLIENT_ID"] = os.environ["KITE_API_KEY"]
+    if os.getenv("KITE_ACCESS_TOKEN"):
+        os.environ["FYERS_ACCESS_TOKEN"] = os.environ["KITE_ACCESS_TOKEN"]

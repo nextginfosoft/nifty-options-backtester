@@ -102,7 +102,7 @@ def _check_fyers_token_and_warn() -> tuple[bool, bool]:
     
     # Market is open - check if token is valid
     try:
-        from fyers_apiv3 import fyersModel as _fm
+        from data.broker import fyersModel as _fm
         
         _client_id = _os.getenv("FYERS_CLIENT_ID")
         _token = _os.getenv("FYERS_ACCESS_TOKEN")
@@ -1098,7 +1098,7 @@ def run_signal(config: BacktestConfig) -> None:
     live_vix_available = False
     if data_date_str < today:
         try:
-            from fyers_apiv3 import fyersModel as _fyersModel
+            from data.broker import fyersModel as _fyersModel
             import os as _os_live
             load_env()
 
@@ -1370,7 +1370,7 @@ def run_signal(config: BacktestConfig) -> None:
     
     # Try Fyers first during market hours (9:15 AM - 3:30 PM IST)
     try:
-        from fyers_apiv3 import fyersModel as _fyersModel
+        from data.broker import fyersModel as _fyersModel
         from data.option_chain import OptionChainSnapshot, StrikeData
         from datetime import datetime as _dt2
         import os as _os2
@@ -2286,7 +2286,7 @@ def run_monitor(config: BacktestConfig) -> None:
 
     # Try Fyers first — fetch ONLY the exact option legs we hold (fast, accurate)
     try:
-        from fyers_apiv3 import fyersModel as _fyersModel
+        from data.broker import fyersModel as _fyersModel
         from data.option_chain import OptionChainSnapshot, StrikeData
         from datetime import datetime as _dt
         import os as _os
@@ -3201,7 +3201,7 @@ def run_signal_combined(config: BacktestConfig) -> None:
     live_vix_available = False
     if stale_days > 0:
         try:
-            from fyers_apiv3 import fyersModel as _fyersModel
+            from data.broker import fyersModel as _fyersModel
             import os as _os_live
             load_env()
 
@@ -3446,7 +3446,7 @@ def run_signal_combined(config: BacktestConfig) -> None:
         _m_snapshot = None
         _m_live_spot = spot
         try:
-            from fyers_apiv3 import fyersModel as _fm
+            from data.broker import fyersModel as _fm
             from data.option_chain import OptionChainSnapshot, StrikeData
             from datetime import datetime as _dt3
             import os as _os3
