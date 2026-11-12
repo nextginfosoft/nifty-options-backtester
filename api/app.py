@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -20,7 +21,8 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from api import auth, autologin, broker_routes, credentials_routes, datarefresh, routes_ledger, server
+from api import auth, autologin, autotrader, broker_routes, credentials_routes, datarefresh, routes_auto, routes_ledger, server
+from api.autotrader import AutoTrader, KiteFeed, ServerData
 from api.credentials import CredentialError, CredentialStore
 from api.ledger import Ledger, LedgerError, NotFound
 from api.settings import Settings, load_settings
@@ -48,8 +50,9 @@ def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] 
         task = asyncio.create_task(asyncio.to_thread(server.load_all)) if load_market else None
         sched = asyncio.create_task(autologin.scheduler(app)) if run_scheduler else None
         refresher = asyncio.create_task(datarefresh.scheduler()) if run_scheduler else None
+        trader = asyncio.create_task(autotrader.scheduler(app)) if run_scheduler else None
         yield
-        for t in (task, sched, refresher):
+        for t in (task, sched, refresher, trader):
             if t and not t.done():
                 t.cancel()
 
@@ -64,6 +67,9 @@ def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] 
     app.state.settings = settings
     app.state.ledger = Ledger(settings.storage_dir / "ledger.sqlite3")
     app.state.creds = CredentialStore(settings.storage_dir, settings.credentials_key, settings.is_production)
+    app.state.autotrader = AutoTrader(
+        app.state.ledger, KiteFeed(), ServerData(server._state), lot_size=settings.lot_size,
+        initial_capital=float(os.getenv("PAPER_INITIAL_CAPITAL", "2500000")), regime_fn=server._infer_regime)
 
     @app.exception_handler(NotFound)
     async def _not_found(_: Request, exc: NotFound):
@@ -93,6 +99,7 @@ def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] 
     protected.include_router(routes_ledger.router)
     protected.include_router(broker_routes.router)
     protected.include_router(credentials_routes.router)
+    protected.include_router(routes_auto.router)
     api.include_router(protected)
     app.include_router(api)
 

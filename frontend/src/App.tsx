@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, setUnauthorizedHandler, useApi } from "./api";
+import Auto from "./Auto";
 import Broker from "./Broker";
 import Dashboard from "./Dashboard";
 import DailyLog from "./DailyLog";
@@ -9,10 +10,11 @@ import { num } from "./format";
 import type { Health, Journal, Live } from "./types";
 import { Pill } from "./ui";
 
-type Tab = "dashboard" | "trades" | "log" | "broker";
+type Tab = "dashboard" | "trades" | "auto" | "log" | "broker";
 const TABS: { id: Tab; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "trades", label: "Trades" },
+  { id: "auto", label: "Auto trader" },
   { id: "log", label: "Daily log" },
   { id: "broker", label: "Broker" },
 ];
@@ -141,6 +143,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             }}
           />
         )}
+        {tab === "auto" && <Auto />}
         {tab === "log" && <DailyLog journal={current} />}
         {tab === "broker" && <Broker />}
       </main>

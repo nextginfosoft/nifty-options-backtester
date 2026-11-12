@@ -60,6 +60,21 @@ CREATE TABLE IF NOT EXISTS trades (
     created_at TEXT NOT NULL,
     PRIMARY KEY (journal_id, trade_id)
 );
+CREATE TABLE IF NOT EXISTS kv (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auto_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    day TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL,
+    trade_id TEXT,
+    data_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_auto_events_day ON auto_events(day, id);
 CREATE TABLE IF NOT EXISTS daily_log (
     journal_id TEXT NOT NULL REFERENCES journals(journal_id),
     log_date TEXT NOT NULL,
@@ -303,6 +318,50 @@ class Ledger:
             rows = c.execute("SELECT * FROM daily_log WHERE journal_id=? ORDER BY log_date DESC",
                              (journal_id,)).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------ settings + auto-trader timeline
+    def kv_get(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        with self._conn() as c:
+            row = c.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def kv_set(self, key: str, value: str) -> None:
+        with self._conn() as c:
+            c.execute("INSERT INTO kv VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+
+    def kv_delete(self, key: str) -> None:
+        with self._conn() as c:
+            c.execute("DELETE FROM kv WHERE key=?", (key,))
+
+    def add_event(self, at: str, kind: str, code: str, message: str, trade_id: Optional[str] = None,
+                  data: Optional[Dict[str, Any]] = None) -> None:
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO auto_events (at, day, kind, code, message, trade_id, data_json) VALUES (?,?,?,?,?,?,?)",
+                (at, at[:10], kind, code, message, trade_id, json.dumps(data, default=str) if data else None),
+            )
+
+    def list_events(self, limit: int = 200, day: Optional[str] = None) -> List[Dict[str, Any]]:
+        q, args = "SELECT * FROM auto_events", []
+        if day:
+            q += " WHERE day=?"
+            args.append(day)
+        q += " ORDER BY id DESC LIMIT ?"
+        args.append(max(1, min(int(limit), 1000)))
+        with self._conn() as c:
+            rows = c.execute(q, args).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["data"] = json.loads(d.pop("data_json")) if d.get("data_json") else None
+            out.append(d)
+        return out
+
+    def has_event(self, day: str, code: str, since_id: int = 0) -> bool:
+        with self._conn() as c:
+            row = c.execute("SELECT 1 FROM auto_events WHERE day=? AND code=? AND id>? LIMIT 1",
+                            (day, code, since_id)).fetchone()
+        return row is not None
 
     # ------------------------------------------------------------------ CSV export
     def trades_csv(self, journal_id: Optional[str] = None) -> str:
