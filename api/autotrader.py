@@ -36,7 +36,7 @@ from backtester.weekly_exit_policy import (
 from config import CostModel, WeeklyBacktestConfig
 from data.expiry_calendar import get_weekly_expiry_in_range, is_trading_day
 from starlette.concurrency import run_in_threadpool
-from strategies.base import Leg, Trade
+from strategies.base import Leg, Trade, TradeAction
 from strategies.weekly_strategies import WeeklyIronCondor, WeeklyPutCreditSpread
 from utils.market_clock import is_market_hours, market_day_gate
 
@@ -289,15 +289,16 @@ class AutoTrader:
             if not self.enabled:
                 return
             self._ensure_journal()
+            failed = False
             for name, step in (("settle", self._settle_expired), ("exits", self._manage_exits),
                                ("entry", self._try_entry), ("daily_log", self._daily_log)):
                 try:
                     step(now)
                 except Exception as exc:  # noqa: BLE001
+                    failed = True
                     self._record_error(now, name, exc)
-                else:
-                    if name == "exits":
-                        self.ledger.kv_set(KV_ERRORS, "0")
+            if not failed:
+                self.ledger.kv_set(KV_ERRORS, "0")      # errors must be consecutive TICKS, so reset only on a clean tick
 
     def _record_error(self, now: datetime, step: str, exc: Exception) -> None:
         n = int(self._kv(KV_ERRORS, "0") or 0) + 1
@@ -371,7 +372,7 @@ class AutoTrader:
         lots = self.lots
         strat = _strategy_for(name, lots, self.lot_size)
         row_dict = row.to_dict() if hasattr(row, "to_dict") else dict(row)
-        if strat.should_enter(spot, vix, row_dict).value != "ENTER":
+        if strat.should_enter(spot, vix, row_dict) is not TradeAction.ENTER:
             return skip("STRATEGY_DECLINED", f"{name} declined entry (VIX {vix:.2f}, 5-day return "
                         f"{'n/a' if _isnan(ret5) else format(float(ret5), '.1%')})", inputs=inputs)
 
