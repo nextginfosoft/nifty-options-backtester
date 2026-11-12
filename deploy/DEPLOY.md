@@ -154,6 +154,11 @@ How a deploy works:
 
 Docs-only and CLI-only changes (paths outside the app, front end and image inputs) do not trigger a deploy.
 
+Full test suite: every PR runs the fast dashboard tests. When a change touches code shared between the CLI and the server
+(`strategies/`, `backtester/`, `models/`, `pricing/`, `utils/`, `tests/`, `data/*.py`, `config.py`, or the workflow itself),
+the repo's full suite also runs (seeded cache, no network) and a failure blocks the deploy. If that job is skipped because
+no shared code changed, the deploy proceeds as normal.
+
 One-time setup (the pipeline will fail at "Configure SSH" until this is done):
 1. **Install the server script** (root): `cat deploy/server/niftysell-deploy > /usr/local/sbin/niftysell-deploy`, then
    `chown root:root` and `chmod 755` it.

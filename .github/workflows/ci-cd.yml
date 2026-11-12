@@ -1,6 +1,8 @@
 name: CI/CD
 
-# Pull requests: run the tests, build the front end and check the Docker image builds.
+# Pull requests: run the tests, build the front end and check the Docker image builds. If the change touches code
+# shared with the CLI (strategies, backtester, models, data, config, tests), the repo's full test suite runs too
+# and must pass before a deploy.
 # Pushes to main that change the app (see paths): the same checks, then build the image and deploy it to
 # https://niftysell.nextginfosoft.com. The deploy streams the image over SSH to a restricted key whose only
 # permitted action is /usr/local/sbin/niftysell-deploy (see deploy/server/niftysell-deploy). That script
@@ -106,9 +108,82 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  changes:
+    # Decide whether the PR / push touches code shared between the CLI and the server. Only then is the slow
+    # full suite worth running; UI, docs and server-only changes keep the fast checks above.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      shared: ${{ steps.detect.outputs.shared }}
+    steps:
+      - id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BASE_PR: ${{ github.event.pull_request.base.sha }}
+          HEAD_PR: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          yes() { echo "shared=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          [ "$EVENT" = "workflow_dispatch" ] && yes
+          if [ "$EVENT" = "pull_request" ]; then base="$BASE_PR"; head="$HEAD_PR"; else base="$BEFORE"; head="$SHA"; fi
+          { [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; } && yes
+          files="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${base}...${head}" --paginate --jq '.files[].filename')" || yes
+          echo "Changed files:"; echo "$files"
+          if printf '%s\n' "$files" | grep -E -q '^(strategies|backtester|models|pricing|utils|tests)/|^data/[^/]+\.py$|^data/nse_holidays\.json$|^config\.py$|^scripts/bootstrap_cache\.sh$|^deploy/requirements-server\.txt$|^\.github/workflows/ci-cd\.yml$'; then
+            echo "Shared code changed: the full test suite will run."
+            echo "shared=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No shared code changed: skipping the full suite."
+            echo "shared=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  full-suite:
+    needs: changes
+    if: needs.changes.outputs.shared == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          # The raw data archives are ~2 GB and no test needs them.
+          sparse-checkout: |
+            /*
+            !/data/raw/
+            !/data/processed/
+            !/graphify-out/
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: deploy/requirements-server.txt
+      - name: System libraries (LightGBM needs OpenMP)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
+      - name: Install dependencies
+        run: pip install -r deploy/requirements-server.txt plotly pytest pytest-xdist
+      - name: Seed the model and data cache (git-ignored, so a fresh checkout has none)
+        run: bash scripts/bootstrap_cache.sh
+      - name: Full test suite (no network)
+        env:
+          MARKET_DATA_CACHE_ONLY: "1"
+        run: >
+          python -m pytest tests -p no:cacheprovider -n auto -q -rfE --tb=short --durations=15
+          --ignore=tests/test_api_endpoints.py
+
   deploy:
-    needs: [backend-tests, frontend]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'nextginfosoft/nifty-options-backtester'
+    needs: [backend-tests, frontend, changes, full-suite]
+    # full-suite is skipped when no shared code changed; a skip must not block the deploy, a failure must.
+    if: >-
+      always() && needs.backend-tests.result == 'success' && needs.frontend.result == 'success'
+      && needs.changes.result == 'success'
+      && (needs.full-suite.result == 'success' || needs.full-suite.result == 'skipped')
+      && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      && github.repository == 'nextginfosoft/nifty-options-backtester'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     environment: production
