@@ -61,7 +61,7 @@ jobs:
         run: >
           python -m pytest -q -p no:cacheprovider
           tests/test_dashboard_api.py tests/test_kite_credentials.py
-          tests/test_live_refresh.py tests/test_kite_adapter.py
+          tests/test_live_refresh.py tests/test_kite_adapter.py tests/test_autotrader.py
 
   frontend:
     runs-on: ubuntu-24.04
