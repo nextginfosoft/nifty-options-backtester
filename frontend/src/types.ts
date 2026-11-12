@@ -210,6 +210,47 @@ export interface LiveTrades {
   trades: LiveTrade[];
 }
 
+export interface AutoStatus {
+  enabled: boolean;
+  paused_reason: string;
+  lots: number;
+  lot_size: number;
+  journal_id: string;
+  journal: Journal | null;
+  open_trades: { trade_id: string; strategy: string; expiry_date: string; entry_date: string; entry_credit: number }[];
+  consecutive_errors: number;
+  last_tick: string | null;
+  data_as_of: string | null;
+  schedule: Record<string, string | number>;
+  paper_only: boolean;
+}
+
+export interface AutoEvent {
+  id: number;
+  at: string;
+  day: string;
+  kind: "ENTRY" | "EXIT" | "SKIP" | "ERROR" | "INFO" | "PAUSE";
+  code: string;
+  message: string;
+  trade_id: string | null;
+  data: Record<string, unknown> | null;
+}
+
+export interface AutoPreview {
+  decision: "ENTER" | "SKIP";
+  code: string;
+  message: string;
+  transient?: boolean;
+  blocks: { code: string; message: string }[];
+  strategy?: string;
+  expiry?: string;
+  dte?: number;
+  lots?: number;
+  net_credit?: number;
+  legs?: { action: string; strike: number; option_type: string; entry_price: number; bid: number; ask: number }[];
+  inputs?: { spot?: number; vix?: number; ret_5d?: number | null; data_as_of?: string };
+}
+
 export interface Live {
   ok: boolean;
   source: string | null;
