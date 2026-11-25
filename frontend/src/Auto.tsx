@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, useApi } from "./api";
 import { humanize, inr, num, pct, tone } from "./format";
-import type { AutoEvent, AutoPreview, AutoStatus, LiveTrades } from "./types";
+import type { AutoEvent, AutoPreview, AutoStatus, LiveTrades, Trade, TradeFills } from "./types";
 import { Banner, Card, Empty, ErrorText, Pill, Row } from "./ui";
 
 const kindTone = (k: AutoEvent["kind"]): "good" | "bad" | "warn" | "" =>
@@ -36,6 +36,54 @@ function Preview({ p }: { p: AutoPreview }) {
       ) : null}
       {p.blocks.length ? (
         <p className="note">Schedule gates that would block a real entry right now: {p.blocks.map((b) => b.message).join("; ")}.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function Fills({ tradeId }: { tradeId: string }) {
+  const f = useApi<TradeFills>(`/api/trades/${tradeId}/fills?journal_id=AUTO`);
+  const d = f.data;
+  if (!d) return <Empty>{f.error ?? "Loading…"}</Empty>;
+  return (
+    <div>
+      <Row k="Entry">{d.entry.date} {d.entry.time_ist} IST · Nifty {num(d.entry.spot)} · VIX {num(d.entry.vix)} · net credit {num(d.entry.net_credit)} ({inr(d.money.credit_rupees)})</Row>
+      {d.exit ? (
+        <Row k="Exit">
+          {d.exit.date} {d.exit.time_ist ?? "(time not recorded)"} · {humanize(d.exit.reason ?? "")} · net debit {num(d.exit.net_debit)} ({inr(d.money.debit_rupees)})
+        </Row>
+      ) : null}
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Leg</th><th>Entry bid</th><th>Entry ask</th><th>Entry fill</th><th>Spread cost</th><th>Exit bid</th><th>Exit ask</th><th>Exit fill</th><th>Leg P&amp;L</th></tr>
+          </thead>
+          <tbody>
+            {d.legs.map((l, i) => (
+              <tr key={i}>
+                <td>{l.action} {l.strike}{l.option_type}</td>
+                <td className="num">{num(l.entry_bid)}</td>
+                <td className="num">{num(l.entry_ask)}</td>
+                <td className="num">{num(l.entry_price)}</td>
+                <td className="num">{inr(l.entry_spread_cost)}</td>
+                <td className="num">{num(l.exit_bid)}</td>
+                <td className="num">{num(l.exit_ask)}</td>
+                <td className="num">{num(l.exit_price)}</td>
+                <td className={`num ${tone(l.leg_pnl)}`}>{inr(l.leg_pnl)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Row k="Result">
+        gross <span className={`num ${tone(d.money.gross_pnl)}`}>{inr(d.money.gross_pnl)}</span> − fees {inr(d.money.fees)} ={" "}
+        net <span className={`num ${tone(d.money.net_pnl)}`}>{inr(d.money.net_pnl)}</span>
+      </Row>
+      {d.exit && !d.exit.per_leg_recorded ? (
+        <p className="note">
+          This trade was closed by hand ({d.source.exit}), so only the net exit debit was recorded, not per-leg exit prices, an exit time or fees.
+          Trades closed by the auto trader record all of them.
+        </p>
       ) : null}
     </div>
   );
@@ -86,6 +134,10 @@ export default function Auto() {
   }
 
   const openTrades = s?.open_trades ?? [];
+  const all = useApi<{ trades: Trade[] }>("/api/trades?journal_id=AUTO&status=all", 30000);
+  const allTrades = all.data?.trades ?? [];
+  const [selected, setSelected] = useState("");
+  const pick = allTrades.some((t) => t.trade_id === selected) ? selected : (allTrades[0]?.trade_id ?? "");
 
   return (
     <>
@@ -176,6 +228,26 @@ export default function Auto() {
           })
         )}
         <p className="note">Full trade history and CSV export are on the Trades tab, journal “Auto paper trader”.</p>
+      </Card>
+
+      <Card
+        title="Execution detail (buy / sell prices)"
+        actions={<a className="button" href="/api/export/fills.csv?journal_id=AUTO">Download fills CSV</a>}
+      >
+        {allTrades.length === 0 ? (
+          <Empty>No auto trades yet.</Empty>
+        ) : (
+          <>
+            <div className="actions">
+              <select aria-label="Trade" value={pick} onChange={(e) => setSelected(e.target.value)}>
+                {allTrades.map((t) => (
+                  <option key={t.trade_id} value={t.trade_id}>{t.trade_id} · {t.entry_date} · {t.status}</option>
+                ))}
+              </select>
+            </div>
+            <Fills key={pick} tradeId={pick} />
+          </>
+        )}
       </Card>
 
       <Card title="Decision timeline (newest first)">
