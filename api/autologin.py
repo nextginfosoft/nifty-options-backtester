@@ -28,11 +28,17 @@ MANUAL_COOLDOWN_SECONDS = 60
 EARLIEST_HOUR_IST = 6          # Kite tokens expire ~06:00 IST
 CHECK_INTERVAL_SECONDS = 300
 
-state: Dict[str, Any] = {"day": None, "attempts": 0, "last_at": 0.0, "blocked": False, "last": None}
+state: Dict[str, Any] = {"day": None, "attempts": 0, "last_at": 0.0, "blocked": False, "last": None,
+                         "token_rejected": False}
 
 
 def reset_state() -> None:
-    state.update(day=None, attempts=0, last_at=0.0, blocked=False, last=None)
+    state.update(day=None, attempts=0, last_at=0.0, blocked=False, last=None, token_rejected=False)
+
+
+def note_token_rejected() -> None:
+    """Kite refused the saved token (it can die before the nominal 06:00 expiry). Lets the next scheduler pass log in again."""
+    state["token_rejected"] = True
 
 
 def _today_ist() -> str:
@@ -94,6 +100,7 @@ async def run_login(app, automatic: bool) -> Dict[str, Any]:
         return _record(False, f"Login request failed ({exc.__class__.__name__}); will retry later", automatic)
 
     state["blocked"] = False
+    state["token_rejected"] = False
     return _record(True, "Connected for today's session", automatic)
 
 
@@ -119,9 +126,19 @@ def is_due(app, now_ist: Optional[datetime] = None) -> bool:
         return False
     if time.time() - state["last_at"] < MIN_GAP_SECONDS:
         return False
-    if broker_routes._token_expires_at(app.state.settings.storage_dir) and os.getenv("KITE_ACCESS_TOKEN"):
+    if (not state["token_rejected"] and broker_routes._token_expires_at(app.state.settings.storage_dir)
+            and os.getenv("KITE_ACCESS_TOKEN")):
         return False  # already connected for this session
     return True
+
+
+def _log_event(app, result: Dict[str, Any]) -> None:
+    """Persist each automatic attempt in the decision timeline so it survives restarts and can be reviewed."""
+    try:
+        app.state.ledger.add_event(result["at"], "INFO" if result["ok"] else "ERROR", "AUTO_LOGIN_OK" if result["ok"] else "AUTO_LOGIN_FAILED",
+                                   f"Kite auto-login: {result['message']} (attempt {state['attempts']} of {MAX_AUTO_ATTEMPTS_PER_DAY} today)")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not record auto-login event: %s", exc.__class__.__name__)
 
 
 async def scheduler(app) -> None:
@@ -132,6 +149,7 @@ async def scheduler(app) -> None:
             if is_due(app):
                 result = await run_login(app, automatic=True)
                 logger.info("Kite auto-login attempt: ok=%s", result["ok"])
+                _log_event(app, result)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
