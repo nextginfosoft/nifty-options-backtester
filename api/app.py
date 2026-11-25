@@ -67,9 +67,11 @@ def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] 
     )
     app.state.settings = settings
     app.state.ledger = Ledger(settings.storage_dir / "ledger.sqlite3")
-    app.state.notifier = Notifier()
-    app.state.ledger.on_event = app.state.notifier.notify_event
     app.state.creds = CredentialStore(settings.storage_dir, settings.credentials_key, settings.is_production)
+    app.state.alert_creds = CredentialStore(settings.storage_dir, settings.credentials_key, settings.is_production,
+                                            filename="telegram_alerts.enc")
+    app.state.notifier = Notifier(app.state.alert_creds)
+    app.state.ledger.on_event = app.state.notifier.notify_event
     app.state.autotrader = AutoTrader(
         app.state.ledger, KiteFeed(), ServerData(server._state), lot_size=settings.lot_size,
         initial_capital=float(os.getenv("PAPER_INITIAL_CAPITAL", "2500000")), regime_fn=server._infer_regime)

@@ -301,6 +301,10 @@ export interface AlertStatus {
   last_ok: boolean | null;
   last_error: string | null;
   last_sent_at: number | null;
+  saved: { bot_token: boolean; chat_id: boolean };
+  chat_id_masked: string;
+  source: "dashboard" | "environment" | null;
+  encryption_available: boolean;
 }
 
 export interface AutoPreview {

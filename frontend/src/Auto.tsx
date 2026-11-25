@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { api, useApi } from "./api";
 import { humanize, inr, num, pct, tone } from "./format";
-import type { AlertStatus, AutoEvent, AutoPreview, AutoStatus, ExitPreview, LiveTrades, Trade, TradeFills } from "./types";
+import type { AutoEvent, AutoPreview, AutoStatus, ExitPreview, LiveTrades, Trade, TradeFills } from "./types";
+import AlertSettings from "./AlertSettings";
 import { Banner, Card, Empty, ErrorText, Pill, Row } from "./ui";
 
 const kindTone = (k: AutoEvent["kind"]): "good" | "bad" | "warn" | "" =>
@@ -139,8 +140,6 @@ export default function Auto() {
   const [lots, setLots] = useState("");
   const [preview, setPreview] = useState<AutoPreview | null>(null);
   const [exitCheck, setExitCheck] = useState<ExitPreview | null>(null);
-  const alerts = useApi<AlertStatus>("/api/auto/alerts");
-  const [alertMsg, setAlertMsg] = useState<string | null>(null);
 
   async function act(path: string, method = "POST", body: unknown = {}) {
     setBusy(true);
@@ -175,20 +174,6 @@ export default function Auto() {
       setExitCheck(await api<ExitPreview>("/api/auto/exit-preview"));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function testAlert() {
-    setBusy(true);
-    setAlertMsg(null);
-    try {
-      const r = await api<AlertStatus & { ok: boolean; detail: string }>("/api/auto/alerts/test", { method: "POST", body: {} });
-      setAlertMsg(r.ok ? "Test alert sent." : `Not sent: ${r.detail}`);
-      alerts.reload();
-    } catch (err) {
-      setAlertMsg(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -260,14 +245,6 @@ export default function Auto() {
               Set lots
             </button>
           </div>
-          <Row k="Alerts">
-            <Pill tone={alerts.data?.configured ? "good" : "warn"}>{alerts.data?.configured ? "Telegram on" : "Off"}</Pill>{" "}
-            {alerts.data?.configured ? <button disabled={busy} onClick={() => void testAlert()}>Send test alert</button> : null}
-            {alertMsg ? <span className="muted"> {alertMsg}</span> : null}
-          </Row>
-          {alerts.data && !alerts.data.configured ? (
-            <p className="note">Push alerts for entries, exits, pauses and problems are off. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in the server .env to turn them on.</p>
-          ) : null}
           <p className="note">
             Paper only. Entry check Mon/Tue 11:05–12:55 IST (one decision a day), exit checks every minute 09:15–15:30, daily log at
             16:30. It pauses itself at a 15% drawdown or after repeated errors. The strategy is not a validated candidate (see the repo notes).
@@ -329,6 +306,8 @@ export default function Auto() {
           </>
         )}
       </Card>
+
+      <AlertSettings />
 
       <Card title="Decision timeline (newest first)">
         {(events.data?.events.length ?? 0) === 0 ? (
