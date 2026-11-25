@@ -531,32 +531,42 @@ class AutoTrader:
         for t in live:
             self._evaluate_exit(t, now, snap, quotes["legs"])
 
-    def _evaluate_exit(self, t: Dict[str, Any], now: datetime, snap: Dict[str, float], q: Dict[LegKey, Dict[str, Any]]) -> None:
+    def _exit_decision(self, t: Dict[str, Any], now: datetime, snap: Dict[str, float], q: Dict[LegKey, Dict[str, Any]],
+                       *, persist: bool) -> Dict[str, Any]:
+        """The exit rules applied to live prices. persist=False (previews) leaves the stored tracker untouched."""
         today, expiry = now.date(), date.fromisoformat(t["expiry_date"])
         keys = [(expiry, float(l["strike"]), l["option_type"]) for l in t["legs"]]
         missing = [k for k in keys if k not in q]
         if missing:
-            self._throttled_event(now, "ERROR", "NO_QUOTES", f"No live quote for {len(missing)} leg(s) of {t['trade_id']}")
-            return
+            return {"missing": len(missing), "keys": keys}
         marks = {k: _mid(q[k]) for k in keys}
         dte = (expiry - today).days
         obj, _ = self._trade_obj(t, snap["spot"], snap["vix"], dte, marks)
         tracker = self._load_tracker(t["trade_id"], obj)
         update_tracker(tracker, obj, snap["spot"])
-        self._save_tracker(t["trade_id"], tracker)
+        if persist:
+            self._save_tracker(t["trade_id"], tracker)
         equity = self.ledger.summary(AUTO_JOURNAL)["account_equity"]
+        held = trading_days_held(date.fromisoformat(t["entry_date"]), today)
         should_exit, reason = check_weekly_exit(
             config=WeeklyBacktestConfig(), trade=obj, tracker=tracker, spot=snap["spot"], vix=snap["vix"], dte=dte,
-            entry_vix=float(t["entry_vix"] or snap["vix"]), current_equity=equity,
-            holding_days=trading_days_held(date.fromisoformat(t["entry_date"]), today))
+            entry_vix=float(t["entry_vix"] or snap["vix"]), current_equity=equity, holding_days=held)
         name = reason.name.lower() if reason is not None else ""
         if not should_exit and today == expiry and now.time() >= EXPIRY_BACKSTOP:
             should_exit, name = True, "expiry_backstop"
-        if should_exit:
-            self._close(t, now, snap, q, keys, name)
+        return {"missing": 0, "keys": keys, "should_exit": should_exit, "reason": name, "dte": dte, "held": held}
 
-    def _close(self, t: Dict[str, Any], now: datetime, snap: Dict[str, float], q: Dict[LegKey, Dict[str, Any]],
-               keys: List[LegKey], reason: str) -> None:
+    def _evaluate_exit(self, t: Dict[str, Any], now: datetime, snap: Dict[str, float], q: Dict[LegKey, Dict[str, Any]]) -> None:
+        d = self._exit_decision(t, now, snap, q, persist=True)
+        if d["missing"]:
+            self._throttled_event(now, "ERROR", "NO_QUOTES", f"No live quote for {d['missing']} leg(s) of {t['trade_id']}")
+            return
+        if d["should_exit"]:
+            self._close(t, now, snap, q, d["keys"], d["reason"])
+
+    @staticmethod
+    def _exit_fills(t: Dict[str, Any], keys: List[LegKey], q: Dict[LegKey, Dict[str, Any]]) -> Tuple[float, List[Dict[str, Any]]]:
+        """Conservative paper close: shorts are bought back at the ask, longs sold at the bid."""
         sells = longs = 0.0
         legs_out = []
         for leg, k in zip(t["legs"], keys):
@@ -569,9 +579,56 @@ class AutoTrader:
                 longs += price
             legs_out.append({"action": leg["action"], "strike": leg["strike"], "option_type": leg["option_type"],
                              "exit_price": round(price, 2), "bid": bid, "ask": ask})
-        debit = round(max(sells - longs, 0.0), 2)
+        return round(max(sells - longs, 0.0), 2), legs_out
+
+    def _close(self, t: Dict[str, Any], now: datetime, snap: Dict[str, float], q: Dict[LegKey, Dict[str, Any]],
+               keys: List[LegKey], reason: str) -> None:
+        debit, legs_out = self._exit_fills(t, keys, q)
         self._finish(t, now, debit, reason, "closed at live bid/ask", {"legs": legs_out, "spot": snap["spot"], "vix": snap["vix"]},
                      exit_day=now.date(), exit_time=now.strftime("%H:%M"))
+
+    def exit_preview(self, now: datetime) -> Dict[str, Any]:
+        """What the exit rules would do to each open position right now, on live prices. Records and closes nothing."""
+        with self._lock:
+            today = now.date()
+            trades = self.ledger.list_trades(AUTO_JOURNAL, "open") if self._journal_exists() else []
+            in_session = not market_day_gate(today) and EXIT_FROM <= now.time() <= EXIT_UNTIL
+            out: Dict[str, Any] = {"ok": True, "in_session": in_session, "as_of": now.isoformat(timespec="seconds"),
+                                   "auto_enabled": self.enabled, "trades": []}
+            live = [t for t in trades if date.fromisoformat(t["expiry_date"]) >= today]
+            for t in trades:
+                if t not in live:
+                    out["trades"].append({"trade_id": t["trade_id"], "decision": "SETTLE", "reason": "expired",
+                                          "message": "Past expiry: it is settled at the Nifty close on the next tick."})
+            if not live:
+                return _jsonable(out)
+            keys: List[LegKey] = []
+            for t in live:
+                exp = date.fromisoformat(t["expiry_date"])
+                keys += [(exp, float(l["strike"]), l["option_type"]) for l in t["legs"]]
+            try:
+                snap, quotes = self.feed.snapshot(), self.feed.leg_quotes(keys)
+            except FeedError as exc:
+                out.update(ok=False, reason=f"Live quotes unavailable: {exc}")
+                return _jsonable(out)
+            out["spot"], out["vix"] = snap["spot"], snap["vix"]
+            for t in live:
+                d = self._exit_decision(t, now, snap, quotes["legs"], persist=False)
+                if d["missing"]:
+                    out["trades"].append({"trade_id": t["trade_id"], "decision": "UNKNOWN", "reason": "no_quotes",
+                                          "message": f"No live quote for {d['missing']} leg(s)."})
+                    continue
+                debit, legs = self._exit_fills(t, d["keys"], quotes["legs"])
+                units = t["lots"] * t["lot_size"]
+                gross = round((t["entry_credit"] - debit) * units, 2)
+                fees = fees_for(t["entry_credit"], len(t["legs"]), t["lots"], t["lot_size"])
+                captured = round((t["entry_credit"] - debit) / t["entry_credit"] * 100, 1) if t["entry_credit"] else None
+                out["trades"].append({
+                    "trade_id": t["trade_id"], "strategy": t["strategy"], "expiry_date": t["expiry_date"], "dte": d["dte"],
+                    "days_held": d["held"], "decision": "EXIT" if d["should_exit"] else "HOLD", "reason": d["reason"],
+                    "entry_credit": t["entry_credit"], "exit_debit_est": debit, "pct_credit_captured": captured,
+                    "gross_pnl_est": gross, "fees_est": fees, "net_pnl_est": round(gross - fees, 2), "legs": legs})
+            return _jsonable(out)
 
     def _finish(self, t: Dict[str, Any], now: datetime, debit: float, reason: str, how: str, data: Dict[str, Any],
                 exit_day: date, exit_time: str) -> None:

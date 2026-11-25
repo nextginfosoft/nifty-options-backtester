@@ -79,6 +79,23 @@ async def events(request: Request, limit: int = Query(200, ge=1, le=1000), day: 
     return {"count": len(rows), "events": rows}
 
 
+@router.get("/exit-preview")
+async def exit_preview(request: Request) -> Dict[str, Any]:
+    """What the exit rules would do to each open position right now, on live prices. Records and closes nothing."""
+    return await run_in_threadpool(_at(request).exit_preview, server.now_ist())
+
+
+@router.get("/alerts")
+async def alerts_status(request: Request) -> Dict[str, Any]:
+    return request.app.state.notifier.status()
+
+
+@router.post("/alerts/test")
+async def alerts_test(request: Request) -> Dict[str, Any]:
+    ok, detail = await run_in_threadpool(request.app.state.notifier.send, "[Nifty paper] Test alert: alerts are working.")
+    return {"ok": ok, "detail": detail, **request.app.state.notifier.status()}
+
+
 @router.get("/preview")
 async def preview(request: Request) -> Dict[str, Any]:
     """What the trader would decide right now (schedule gates reported but ignored). Records nothing."""

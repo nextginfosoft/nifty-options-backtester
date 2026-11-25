@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from api import live_pnl, server
+from api.autotrader import fees_for
 from api.ledger import Ledger, max_drawdown_pct
 
 router = APIRouter()
@@ -67,7 +68,7 @@ class TradeClose(BaseModel):
     exit_reason: str = Field(min_length=1, max_length=60)
     exit_date: Optional[date] = None
     exit_time_ist: str = Field(default="", max_length=8)
-    brokerage: float = Field(default=0.0, ge=0)
+    brokerage: Optional[float] = Field(default=None, ge=0, description="Fees in rupees; estimated from the cost model when omitted")
     notes: str = Field(default="", max_length=2000)
 
 
@@ -206,10 +207,19 @@ async def open_trade(body: TradeOpen, request: Request) -> Dict[str, Any]:
 async def close_trade(trade_id: str, body: TradeClose, request: Request,
                       journal_id: str = Query(...)) -> Dict[str, Any]:
     _live_cache.clear()
-    return _ledger(request).close_trade(
+    led = _ledger(request)
+    now = server.now_ist()
+    t = led.get_trade(journal_id, trade_id)
+    exit_day = body.exit_date or now.date()
+    notes = body.notes
+    fees = body.brokerage
+    if fees is None:        # a hand close must not silently report zero fees
+        fees = fees_for(t["entry_credit"], len(t["legs"]), t["lots"], t["lot_size"])
+        notes = (notes + " " if notes else "") + "[fees estimated from the cost model]"
+    exit_time = body.exit_time_ist or (now.strftime("%H:%M") if exit_day == now.date() else "")
+    return led.close_trade(
         journal_id, trade_id, exit_debit=body.exit_debit, exit_reason=body.exit_reason,
-        exit_date=(body.exit_date or date.today()).isoformat(), exit_time_ist=body.exit_time_ist,
-        brokerage=body.brokerage, notes=body.notes,
+        exit_date=exit_day.isoformat(), exit_time_ist=exit_time, brokerage=fees, notes=notes,
     )
 
 

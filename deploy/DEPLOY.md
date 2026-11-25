@@ -61,6 +61,7 @@ Fill in:
 | `SESSION_SECRET` | `openssl rand -hex 32` (32+ characters; the app refuses to start without it) |
 | `KITE_API_KEY` / `KITE_API_SECRET` | optional, from developers.kite.trade (or enter them in the dashboard, see step 6) |
 | `CREDENTIALS_KEY` | `openssl rand -hex 32`. Needed to save Zerodha details from the dashboard; keep it out of the data volume and backups. If you change it, saved credentials must be re-entered |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | optional push alerts (entry, exit, pause, problems) from the auto trader. Create a bot with @BotFather, send it a message, then read your chat id from `getUpdates`. Test with the "Send test alert" button on the Auto tab. Needs the container to be recreated (`docker compose up -d`) after you add them |
 
 `deploy/.env` is git-ignored. Never commit it, and never put these values in front-end code.
 
