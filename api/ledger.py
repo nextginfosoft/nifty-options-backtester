@@ -357,6 +357,97 @@ class Ledger:
             out.append(d)
         return out
 
+    def fills_for_trade(self, journal_id: str, trade_id: str) -> Dict[str, Any]:
+        """Per-leg buy/sell price log for one trade: entry fills, exit fills (when the engine recorded them),
+        and the money summary. Built from the trade row plus its ENTRY/EXIT event payloads."""
+        t = self.get_trade(journal_id, trade_id)
+        with self._conn() as c:
+            rows = c.execute("SELECT * FROM auto_events WHERE trade_id=? AND kind IN ('ENTRY','EXIT') ORDER BY id",
+                             (trade_id,)).fetchall()
+        ev: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            ev[r["kind"]] = {"at": r["at"], "data": json.loads(r["data_json"]) if r["data_json"] else {}}
+        qty = t["lots"] * t["lot_size"]
+        entry_ev, exit_ev = ev.get("ENTRY"), ev.get("EXIT")
+        quotes_in = {(l["action"], float(l["strike"]), l["option_type"]): l
+                     for l in (entry_ev or {}).get("data", {}).get("legs", [])}
+        quotes_out = {(l["action"], float(l["strike"]), l["option_type"]): l
+                      for l in (exit_ev or {}).get("data", {}).get("legs", [])}
+        legs = []
+        for l in t["legs"]:
+            k = (l["action"], float(l["strike"]), l["option_type"])
+            qi, qo = quotes_in.get(k, {}), quotes_out.get(k, {})
+            sell = l["action"] == "SELL"
+            entry_price = float(l["entry_price"])
+            exit_price = qo.get("exit_price")
+            leg_pnl = None
+            if exit_price is not None:
+                leg_pnl = round(((entry_price - exit_price) if sell else (exit_price - entry_price)) * qty, 2)
+            # cost of crossing the spread on entry vs the mid price (always >= 0 for a bid/ask fill)
+            spread_cost = None
+            if qi.get("bid") and qi.get("ask"):
+                mid = (float(qi["bid"]) + float(qi["ask"])) / 2
+                spread_cost = round(abs(entry_price - mid) * qty, 2)
+            legs.append({
+                "action": l["action"], "strike": l["strike"], "option_type": l["option_type"],
+                "entry_price": entry_price, "entry_bid": qi.get("bid"), "entry_ask": qi.get("ask"),
+                "entry_ltp": qi.get("ltp"), "entry_spread_cost": spread_cost,
+                "exit_price": exit_price, "exit_bid": qo.get("bid"), "exit_ask": qo.get("ask"), "leg_pnl": leg_pnl,
+            })
+        return {
+            "trade_id": t["trade_id"], "journal_id": journal_id, "status": t["status"], "strategy": t["strategy"],
+            "lots": t["lots"], "lot_size": t["lot_size"], "quantity": qty, "expiry_date": t["expiry_date"],
+            "entry": {"date": t["entry_date"], "time_ist": t["entry_time_ist"], "spot": t["entry_spot"],
+                      "vix": t["entry_vix"], "net_credit": t["entry_credit"],
+                      "inputs": (entry_ev or {}).get("data", {}).get("inputs")},
+            "exit": None if t["status"] != "closed" else {
+                "date": t["exit_date"], "time_ist": t["exit_time_ist"] or None, "reason": t["exit_reason"],
+                "net_debit": t["exit_debit"],
+                "spot": (exit_ev or {}).get("data", {}).get("spot"), "vix": (exit_ev or {}).get("data", {}).get("vix"),
+                "per_leg_recorded": bool(quotes_out)},
+            "legs": legs,
+            "money": {"gross_pnl": t["gross_pnl"], "fees": t["brokerage"], "net_pnl": t["net_pnl"],
+                      "credit_rupees": round(t["entry_credit"] * qty, 2),
+                      "debit_rupees": None if t["exit_debit"] is None else round(t["exit_debit"] * qty, 2)},
+            "source": {"entry": "engine" if entry_ev else "ledger", "exit": "engine" if exit_ev else
+                       ("manual close" if t["status"] == "closed" else None)},
+        }
+
+    def fills_csv(self, journal_id: Optional[str] = None) -> str:
+        """One row per leg per phase (ENTRY/EXIT) with bid, ask, fill price and rupee value."""
+        cols = ["Trade_ID", "Phase", "Date", "Time_IST", "Action", "Strike", "Type", "Bid", "Ask", "LTP",
+                "Fill_Price", "Quantity", "Value_Rs", "Spread_Cost_Rs", "Leg_PnL_Rs"]
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=cols, lineterminator="\n")
+        w.writeheader()
+        for t in reversed(self.list_trades(journal_id, "all")):
+            f = self.fills_for_trade(t["journal_id"], t["trade_id"])
+            q = f["quantity"]
+            for l in f["legs"]:
+                sign = 1 if l["action"] == "SELL" else -1
+                w.writerow({"Trade_ID": f["trade_id"], "Phase": "ENTRY", "Date": f["entry"]["date"],
+                            "Time_IST": f["entry"]["time_ist"], "Action": l["action"], "Strike": l["strike"],
+                            "Type": l["option_type"], "Bid": l["entry_bid"] if l["entry_bid"] is not None else "",
+                            "Ask": l["entry_ask"] if l["entry_ask"] is not None else "",
+                            "LTP": l["entry_ltp"] if l["entry_ltp"] is not None else "", "Fill_Price": l["entry_price"],
+                            "Quantity": q, "Value_Rs": round(sign * l["entry_price"] * q, 2),
+                            "Spread_Cost_Rs": l["entry_spread_cost"] if l["entry_spread_cost"] is not None else "",
+                            "Leg_PnL_Rs": ""})
+                if f["exit"] and l["exit_price"] is not None:
+                    w.writerow({"Trade_ID": f["trade_id"], "Phase": "EXIT", "Date": f["exit"]["date"],
+                                "Time_IST": f["exit"]["time_ist"] or "",
+                                "Action": "BUY" if l["action"] == "SELL" else "SELL", "Strike": l["strike"],
+                                "Type": l["option_type"], "Bid": l["exit_bid"] if l["exit_bid"] is not None else "",
+                                "Ask": l["exit_ask"] if l["exit_ask"] is not None else "", "LTP": "",
+                                "Fill_Price": l["exit_price"], "Quantity": q,
+                                "Value_Rs": round(-sign * l["exit_price"] * q, 2), "Spread_Cost_Rs": "",
+                                "Leg_PnL_Rs": l["leg_pnl"]})
+            if f["exit"] and not f["exit"]["per_leg_recorded"]:
+                w.writerow({"Trade_ID": f["trade_id"], "Phase": "EXIT_NET", "Date": f["exit"]["date"],
+                            "Time_IST": f["exit"]["time_ist"] or "", "Action": "NET DEBIT", "Fill_Price": f["exit"]["net_debit"],
+                            "Quantity": q, "Value_Rs": -f["money"]["debit_rupees"] if f["money"]["debit_rupees"] is not None else ""})
+        return buf.getvalue()
+
     def has_event(self, day: str, code: str, since_id: int = 0) -> bool:
         with self._conn() as c:
             row = c.execute("SELECT 1 FROM auto_events WHERE day=? AND code=? AND id>? LIMIT 1",

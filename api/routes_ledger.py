@@ -186,6 +186,12 @@ async def live_trades(request: Request, journal_id: Optional[str] = Query(None))
     return value
 
 
+@router.get("/trades/{trade_id}/fills")
+async def trade_fills(trade_id: str, request: Request, journal_id: str = Query(...)) -> Dict[str, Any]:
+    """Per-leg buy/sell prices (bid, ask, fill) for entry and exit, with spread cost and leg P&L."""
+    return _ledger(request).fills_for_trade(journal_id, trade_id)
+
+
 @router.post("/trades")
 async def open_trade(body: TradeOpen, request: Request) -> Dict[str, Any]:
     data = body.model_dump(mode="json")
@@ -237,6 +243,11 @@ def _csv(text: str, filename: str) -> Response:
 @router.get("/export/trades.csv")
 async def export_trades(request: Request, journal_id: Optional[str] = Query(None)) -> Response:
     return _csv(_ledger(request).trades_csv(journal_id), "TRADES.csv")
+
+
+@router.get("/export/fills.csv")
+async def export_fills(request: Request, journal_id: Optional[str] = Query(None)) -> Response:
+    return _csv(_ledger(request).fills_csv(journal_id), "FILLS.csv")
 
 
 @router.get("/export/daily-log.csv")

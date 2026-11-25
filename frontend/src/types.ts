@@ -236,6 +236,36 @@ export interface AutoEvent {
   data: Record<string, unknown> | null;
 }
 
+export interface FillLeg {
+  action: "BUY" | "SELL";
+  strike: number;
+  option_type: "CE" | "PE";
+  entry_price: number;
+  entry_bid: number | null;
+  entry_ask: number | null;
+  entry_ltp: number | null;
+  entry_spread_cost: number | null;
+  exit_price: number | null;
+  exit_bid: number | null;
+  exit_ask: number | null;
+  leg_pnl: number | null;
+}
+
+export interface TradeFills {
+  trade_id: string;
+  status: "open" | "closed";
+  strategy: string;
+  lots: number;
+  lot_size: number;
+  quantity: number;
+  expiry_date: string;
+  entry: { date: string; time_ist: string; spot: number | null; vix: number | null; net_credit: number };
+  exit: { date: string; time_ist: string | null; reason: string | null; net_debit: number | null; per_leg_recorded: boolean } | null;
+  legs: FillLeg[];
+  money: { gross_pnl: number | null; fees: number | null; net_pnl: number | null; credit_rupees: number; debit_rupees: number | null };
+  source: { entry: string | null; exit: string | null };
+}
+
 export interface AutoPreview {
   decision: "ENTER" | "SKIP";
   code: string;
