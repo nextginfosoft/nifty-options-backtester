@@ -293,6 +293,31 @@ def test_holds_when_nothing_triggers(env):
     assert len(open_trades(ledger)) == 1 and not [c for c in codes(ledger, "2026-11-18") if c[0] == "EXIT"]
 
 
+def test_exits_are_not_evaluated_outside_market_hours(env):
+    at, ledger, feed, _ = env
+    enter(at, ledger, feed, vix=24.0)
+    feed.fail = FeedError("Kite token expired")
+    feed.scale = 3.0                                               # would be a stop-loss if it were evaluated
+    for hh, mm in ((2, 0), (8, 30), (9, 10), (15, 45), (20, 0)):
+        at.tick_sync(ist(2026, 11, 18, hh, mm))
+    assert ("ERROR", "NO_QUOTES") not in codes(ledger, "2026-11-18")
+    feed.fail = None
+    at.tick_sync(ist(2026, 11, 18, 3, 0))
+    at.tick_sync(ist(2026, 11, 21, 11, 0))                         # Saturday
+    assert len(open_trades(ledger)) == 1
+
+
+def test_expired_token_while_holding_asks_autologin_to_retry(env):
+    from api import autologin
+    autologin.reset_state()
+    at, ledger, feed, _ = env
+    enter(at, ledger, feed, vix=24.0)
+    feed.fail = FeedError("Kite token expired")
+    at.tick_sync(ist(2026, 11, 18, 11, 0))
+    assert autologin.state["token_rejected"] is True
+    autologin.reset_state()
+
+
 def test_no_quotes_while_holding_is_flagged_once_and_position_stays(env):
     at, ledger, feed, _ = env
     enter(at, ledger, feed, vix=24.0)

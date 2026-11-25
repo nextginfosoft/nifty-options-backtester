@@ -263,6 +263,31 @@ def test_is_due_rules(tmp_path):
     assert autologin.is_due(app, at(7)) is False  # already connected today
 
 
+def test_rejected_token_overrides_the_clock_but_not_the_daily_cap(tmp_path):
+    app = _app(tmp_path)
+    at = lambda h, m=0: datetime(2026, 11, 12, h, m, tzinfo=broker_routes.IST)  # noqa: E731
+    app.state.creds.update(FAKE, True)
+    broker_routes._save_token(tmp_path, "looks-valid")
+    assert autologin.is_due(app, at(10)) is False            # the clock says the token is good
+    autologin.note_token_rejected()                          # ...but Kite refused it
+    assert autologin.is_due(app, at(10)) is True
+    autologin.state["attempts"] = autologin.MAX_AUTO_ATTEMPTS_PER_DAY
+    assert autologin.is_due(app, at(10)) is False            # still capped at 2 a day
+
+
+def test_successful_login_clears_the_rejected_flag_and_is_logged(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    app.state.creds.update(FAKE, True)
+    monkeypatch.setattr("api.autologin.login_for_request_token", lambda *a, **k: "t")
+    monkeypatch.setattr(broker_routes, "_exchange", lambda rt: "acc")
+    autologin.note_token_rejected()
+    r = asyncio.run(autologin.run_login(app, automatic=True))
+    assert r["ok"] and autologin.state["token_rejected"] is False
+    autologin._log_event(app, r)
+    ev = app.state.ledger.list_events(5)[0]
+    assert ev["code"] == "AUTO_LOGIN_OK" and "acc" not in ev["message"]
+
+
 def test_manual_attempts_have_a_cooldown(tmp_path, monkeypatch):
     app = _app(tmp_path)
     app.state.creds.update(FAKE, True)

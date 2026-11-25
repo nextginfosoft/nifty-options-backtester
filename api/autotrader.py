@@ -46,6 +46,7 @@ AUTO_JOURNAL = "AUTO"
 DEFAULT_LOTS, MIN_LOTS, MAX_LOTS = 15, 1, 30
 ENTRY_FROM, ENTRY_UNTIL = time(11, 5), time(12, 55)
 EXPIRY_BACKSTOP = time(15, 15)
+EXIT_FROM, EXIT_UNTIL = time(9, 16), time(15, 30)   # exits are only evaluated while the market is open
 DAILY_LOG_AT = time(16, 30)
 TICK_SECONDS = 60
 MIN_NET_CREDIT = 5.0              # rupees per unit; below this the trade is not worth taking
@@ -509,6 +510,8 @@ class AutoTrader:
         if not trades:
             return
         today = now.date()
+        if market_day_gate(today) or not (EXIT_FROM <= now.time() <= EXIT_UNTIL):
+            return          # off-hours quotes are stale (and the token is often being renewed): only manage in session
         live = [t for t in trades if date.fromisoformat(t["expiry_date"]) >= today]
         if not live:
             return
@@ -519,6 +522,9 @@ class AutoTrader:
         try:
             snap, quotes = self.feed.snapshot(), self.feed.leg_quotes(keys)
         except FeedError as exc:
+            if "token" in str(exc) or "not connected" in str(exc):
+                from api import autologin
+                autologin.note_token_rejected()      # lets the scheduler log in again within minutes
             self._throttled_event(now, "ERROR", "NO_QUOTES",
                                   f"Cannot manage the open position: live quotes unavailable ({exc}). Exits are paused until quotes return.")
             return
