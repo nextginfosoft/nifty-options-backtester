@@ -307,6 +307,15 @@ export interface AlertStatus {
   encryption_available: boolean;
 }
 
+export interface BackupStatus {
+  offsite_configured: boolean;
+  last_offsite_at: string | null;
+  last_local_at: string | null;
+  last_error: string | null;
+  local_copies: number;
+  stale: boolean;
+}
+
 export interface AutoPreview {
   decision: "ENTER" | "SKIP";
   code: string;

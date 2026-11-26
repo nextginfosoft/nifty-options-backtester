@@ -8,6 +8,7 @@ and the UI can show a "loading" state instead of the process failing to start.
 import logging
 import os
 import threading
+import time
 import traceback
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -308,10 +309,41 @@ async def refresh_market_data() -> Dict[str, Any]:
 # Health (public)
 # ============================================================================
 
+_STARTED = time.monotonic()
+STALL_AFTER_SECONDS = 5 * 60      # the auto trader ticks every 60 s
+
+
+def _liveness(request: Request) -> Dict[str, Any]:
+    """What an outside monitor needs: is the background loop alive, is the ledger readable, is the backup current.
+
+    Public, so it reports only booleans and one age in seconds, never trade or account data."""
+    app = request.app
+    running = bool(getattr(app.state, "scheduler_running", False))
+    age: Optional[int] = None
+    ledger_ok = True
+    try:
+        last = app.state.ledger.kv_get("auto.last_tick", "") or None
+        if last:
+            age = max(int((now_ist() - datetime.fromisoformat(last)).total_seconds()), 0)
+    except Exception:  # noqa: BLE001 - an unreadable ledger is itself the finding
+        ledger_ok = False
+    uptime = time.monotonic() - _STARTED
+    stalled = running and ((age is None and uptime > STALL_AFTER_SECONDS) or (age is not None and age > STALL_AFTER_SECONDS))
+    try:
+        backup_stale = bool(app.state.backup.status(now_ist())["stale"])
+    except Exception:  # noqa: BLE001
+        backup_stale = False
+    healthy = ledger_ok and not stalled and not backup_stale and _state["status"] == "ready"
+    return {"healthy": healthy, "ledger_ok": ledger_ok,
+            "scheduler": {"running": running, "auto_tick_age_s": age, "stalled": stalled},
+            "backup": {"stale": backup_stale}}
+
+
 @public_router.get("/health")
-async def health_check() -> Dict[str, Any]:
+async def health_check(request: Request) -> Dict[str, Any]:
     return {
         "status": "ok",
+        **_liveness(request),
         "state": _state["status"],
         "market_data_loaded": _state["latest_row"] is not None,
         "models_loaded": len(_state["models"]) == 2,

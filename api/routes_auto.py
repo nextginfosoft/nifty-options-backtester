@@ -114,6 +114,19 @@ async def alerts_save(body: AlertsIn, request: Request) -> Dict[str, Any]:
     return request.app.state.notifier.status()
 
 
+@router.get("/backup")
+async def backup_status(request: Request) -> Dict[str, Any]:
+    return request.app.state.backup.status(server.now_ist())
+
+
+@router.post("/backup/run")
+async def backup_run(request: Request) -> Dict[str, Any]:
+    """Back up the ledger now (encrypted, sent to Telegram)."""
+    svc = request.app.state.backup
+    result = await run_in_threadpool(svc.run, server.now_ist())
+    return {**result, **svc.status(server.now_ist())}
+
+
 @router.delete("/alerts")
 async def alerts_remove(request: Request) -> Dict[str, Any]:
     request.app.state.alert_creds.delete()

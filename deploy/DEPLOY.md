@@ -199,3 +199,17 @@ Manual rollback (on the server): `docker tag niftysell-api:previous niftysell-ap
 | Header shows "degraded" | market data or model load failed; see `docker compose logs api` |
 | Signal says data is loading | first start fetches data from Yahoo; wait for **Data ready** |
 | "Kite token expired" | connect Kite again (daily) |
+
+## Ledger backup and uptime check
+
+**Backup.** Every day at 16:00 IST the app copies the trade ledger (SQLite online backup, so it is safe while the app runs), compresses it, encrypts it with `CREDENTIALS_KEY` and sends it to your Telegram chat. It never sends an unencrypted copy: with no key the backup is refused. The last 7 copies also stay on the server volume (`/app/data/.cache/backups`). Status and a "Back up now" button are in the Telegram card on the Auto tab. A failed send is retried every 30 minutes, up to 6 times a day.
+
+Restore on any machine that has the repo and the key from `deploy/.env`:
+
+```
+CREDENTIALS_KEY=<key> python scripts/restore_ledger_backup.py niftysell-ledger-YYYYMMDD-HHMM.sqlite3.gz.enc ledger.sqlite3
+```
+
+To put it back on the server: stop `niftysell-api`, copy the file over `/app/data/.cache/ledger.sqlite3` in the `niftysell_data` volume (delete `ledger.sqlite3-wal` and `-shm` beside it), start the container.
+
+**Uptime check.** `.github/workflows/uptime.yml` calls the public `/api/health` every 15 minutes from GitHub's runners. The run fails, and GitHub emails the repository owner, when the site is unreachable (4 tries over about 3 minutes), the app is not `ready`, the auto trader loop has not ticked for 5 minutes, the ledger cannot be read, or the daily backup is more than 36 hours old (only once Telegram is set up). GitHub can delay scheduled runs by several minutes, and pauses them after 60 days without repository activity.

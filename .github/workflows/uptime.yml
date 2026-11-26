@@ -1,0 +1,47 @@
+name: Uptime
+
+# Outside check of https://niftysell.nextginfosoft.com every 15 minutes. It touches the server only with one GET of the
+# public /api/health. The run FAILS (GitHub then emails the repository owner) when the site is down, the app reports
+# itself unhealthy, the auto trader loop has stalled, the ledger is unreadable or the daily backup is overdue. It
+# retries a few times first so a brief blip does not raise an alarm.
+# GitHub may delay scheduled runs by several minutes and pauses them after 60 days without repository activity.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+env:
+  URL: https://niftysell.nextginfosoft.com/api/health
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: scripts/check_live_health.py
+      - name: Check the live site
+        run: |
+          for attempt in 1 2 3 4; do
+            if body="$(curl -fsS -m 15 "$URL")"; then
+              if printf '%s' "$body" | python3 scripts/check_live_health.py; then
+                exit 0
+              fi
+            else
+              echo "attempt $attempt: no healthy HTTP answer from $URL"
+            fi
+            sleep 45
+          done
+          echo "::error::niftysell.nextginfosoft.com failed its health check 4 times in a row"
+          exit 1
