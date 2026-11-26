@@ -98,7 +98,7 @@ def test_schedule_retries_a_failed_day_and_stops_after_success(tmp_path, telegra
     assert svc.run(at())["ok"] is True
     assert svc.due(at(hour=18)) is False                          # done today
     assert svc.due(at(day=27)) is False                           # a retry gap of 30 minutes applies after any attempt
-    svc._last_try -= 3600                                         # (an hour later)
+    svc._last_try = (svc._last_try or 0) - 3600                                         # (an hour later)
     assert svc.due(at(day=27)) is True                            # new day, new backup
 
 
@@ -111,7 +111,7 @@ def test_failed_days_retry_every_30_minutes_up_to_six_times(tmp_path, monkeypatc
         assert svc.due(at()) is True
         svc.run(at())
         assert svc.due(at()) is False                             # too soon
-        svc._last_try -= 3600
+        svc._last_try = (svc._last_try or 0) - 3600
     assert svc.due(at()) is False                                 # gave up for today; tomorrow is a fresh start
 
 
@@ -197,3 +197,10 @@ def test_outside_check_judges_health_json():
     assert any("backup" in p for p in mod.problems({**good, "healthy": False, "backup": {"stale": True}}))
     assert any("loading" in p for p in mod.problems({**good, "state": "loading"}))
     assert any("old version" in p for p in mod.problems({"status": "ok", "state": "ready"}))
+
+
+def test_first_backup_is_not_delayed_on_a_freshly_booted_machine(tmp_path, telegram, monkeypatch):
+    from api import backup
+    monkeypatch.setattr(backup.time, "monotonic", lambda: 5.0)          # monotonic() counts from boot
+    ledger, svc = make(tmp_path)
+    assert svc.due(at()) is True

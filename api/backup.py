@@ -43,7 +43,7 @@ class BackupService:
         self.dir = Path(directory)
         self._lock = threading.Lock()
         self._tries: Dict[str, int] = {}
-        self._last_try = 0.0
+        self._last_try: Optional[float] = None
         self._local_day: Optional[str] = None
 
     # ------------------------------------------------------------------ snapshot
@@ -76,7 +76,7 @@ class BackupService:
             return self._local_day != day          # keep one local copy a day, nothing to retry
         if self._tries.get(day, 0) >= MAX_TRIES_PER_DAY:
             return False
-        return time.monotonic() - self._last_try >= RETRY_SECONDS
+        return self._last_try is None or time.monotonic() - self._last_try >= RETRY_SECONDS
 
     def run(self, now: datetime) -> Dict[str, Any]:
         """Take, store and send one backup. Never raises."""
