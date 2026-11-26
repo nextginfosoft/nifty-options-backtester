@@ -71,3 +71,17 @@ def test_holiday_list_cover_and_christmas_2026():
     assert holidays_covered_through() == date(2026, 12, 31)
     assert is_trading_day(date(2026, 12, 25)) is False          # Friday, NSE closed
     assert is_trading_day(date(2026, 12, 24)) is True
+
+
+def test_chart_series_are_ordered_cumulative_and_track_drawdown():
+    closed = [
+        {"trade_id": "A-3", "exit_date": "2026-03-03", "net_pnl": 500.0, "lots": 1},
+        {"trade_id": "A-1", "exit_date": "2026-03-01", "net_pnl": 1000.0, "lots": 2},
+        {"trade_id": "A-2", "exit_date": "2026-03-02", "net_pnl": -3000.0, "lots": 3},
+    ]
+    r = evidence.build(closed)
+    assert [p["label"] for p in r["curve"]] == ["Start", "A-1", "A-2", "A-3"]
+    assert [p["cum_pnl"] for p in r["curve"]] == [0.0, 1000.0, -2000.0, -1500.0]
+    assert [p["drawdown"] for p in r["curve"]] == [0.0, 0.0, -3000.0, -2500.0]       # from the running peak (1000)
+    assert [b["per_lot"] for b in r["trade_bars"]] == [500.0, -1000.0, 500.0]
+    assert evidence.build([])["verdict"]["code"] == "NO_DATA"

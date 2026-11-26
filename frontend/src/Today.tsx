@@ -1,6 +1,8 @@
 import { useApi } from "./api";
 import { humanize, inr, num, pct, tone } from "./format";
 import type { AccountStatus, AlertStatus, AutoEvent, AutoStatus, BackupStatus, BrokerStatus, Health, Live, LiveTrades } from "./types";
+import { PositionRange } from "./charts";
+import type { Trade } from "./types";
 import { Card, Empty, Pill, Row, Stat } from "./ui";
 
 type Level = "bad" | "warn";
@@ -61,6 +63,8 @@ export default function Today({ health }: { health: Health | null }) {
   const s = status.data;
   const open = s?.open_trades ?? [];
   const live = useApi<LiveTrades>(open.length > 0 ? "/api/trades/live?journal_id=AUTO" : null, 30000);
+
+  const openRows = useApi<{ trades: Trade[] }>(open.length > 0 ? "/api/trades?journal_id=AUTO&status=open" : null, 60000);
 
   const loaded = !!(s && health);
   const items = loaded ? attention(s, health, broker.data, alerts.data, backup.data) : [];
@@ -131,6 +135,9 @@ export default function Today({ health }: { health: Health | null }) {
                 <div className="position-head">
                   <strong>{t.trade_id}</strong> <span className="muted">{humanize(t.strategy)} · entered {t.entry_date} · expires {t.expiry_date}</span>
                 </div>
+                {openRows.data?.trades.find((x) => x.trade_id === t.trade_id) ? (
+                  <PositionRange trade={openRows.data.trades.find((x) => x.trade_id === t.trade_id)!} spot={live.data?.spot ?? (quotes.data?.ok ? quotes.data.spot : null)} />
+                ) : null}
                 {lv?.ok ? (
                   <>
                     <div className="position-pnl">
