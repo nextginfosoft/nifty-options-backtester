@@ -62,6 +62,15 @@ def _load_holidays() -> dict[date, dict]:
     return _holiday_cache
 
 
+def holidays_covered_through() -> Optional[date]:
+    """Last date the forward holiday list is known to be complete for (``covered_through``), or None if unset."""
+    try:
+        raw = json.loads(_HOLIDAYS_PATH.read_text(encoding="utf-8")).get("covered_through")
+        return date.fromisoformat(raw) if raw else None
+    except (OSError, ValueError):
+        return None
+
+
 def _load_historical_closures() -> dict[date, dict]:
     """Archive-derived raw expiry days that were exchange holidays (``historical_expiry_closures``)."""
     global _historical_cache

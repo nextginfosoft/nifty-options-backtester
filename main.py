@@ -68,6 +68,7 @@ from strategies.multi_strategy import (
     IronCondorStrategy,
     STRATEGY_DISPLAY,
 )
+from strategies.base import TradeAction
 from strategies.expiry_selector import select_optimal_entry
 from strategies.weekly_strategies import WeeklyIronCondor, WeeklyPutCreditSpread
 from backtester.engine import SmartBacktestEngine
@@ -3589,7 +3590,7 @@ def run_signal_combined(config: BacktestConfig) -> None:
         w_action = w_strategy_obj.should_enter(spot, vix, latest.to_dict()
                                                 if hasattr(latest, "to_dict") else dict(latest))
 
-        if w_action.value != "ENTER":
+        if w_action != TradeAction.ENTER:
             print(f"  Weekly track: SKIP  — strategy {w_strategy_name} declined entry "
                   f"(VIX={vix:.1f}, 5d={latest.get('nifty_return_5d', 0):.1%})")
         else:
@@ -3629,52 +3630,54 @@ def run_signal_combined(config: BacktestConfig) -> None:
                           f"(regime {risk_sizing.regime_scale:.0%} × "
                           f"risk {risk_sizing.risk_scale:.0%})")
 
-            if w_action.value == "ENTER":
+            if w_action != TradeAction.ENTER:
+                print(f"  Weekly track: SKIP  - {w_strategy_name} blocked by the risk engine")
+            else:
                 print(f"\n  Strategy:  {w_strategy_name}")
                 print(f"  Entry day: {weekday_name} | Expiry: {format_expiry_label(w_exp)} "
                       f"({w_dte} DTE) | Lots: {weekly_lots}")
 
-            # Summarise legs
-            net_credit_w = sum(
-                l.entry_premium if l.is_short else -l.entry_premium for l in w_legs
-            )
-            max_loss_w = 0.0
-            short_legs_w = [l for l in w_legs if l.is_short]
-            long_legs_w  = [l for l in w_legs if not l.is_short]
-            for sl in short_legs_w:
-                for ll in long_legs_w:
-                    if sl.option_type == ll.option_type:
-                        max_loss_w = max(max_loss_w, abs(sl.strike - ll.strike) - net_credit_w)
+                # Summarise legs
+                net_credit_w = sum(
+                    l.entry_premium if l.is_short else -l.entry_premium for l in w_legs
+                )
+                max_loss_w = 0.0
+                short_legs_w = [l for l in w_legs if l.is_short]
+                long_legs_w  = [l for l in w_legs if not l.is_short]
+                for sl in short_legs_w:
+                    for ll in long_legs_w:
+                        if sl.option_type == ll.option_type:
+                            max_loss_w = max(max_loss_w, abs(sl.strike - ll.strike) - net_credit_w)
 
-            print(f"\n  {'='*65}")
-            print(f"  SUGGESTED WEEKLY TRADE: {w_strategy_name}")
-            print(f"  Expiry: {format_expiry_label(w_exp)} ({w_dte} DTE) | "
-                  f"BS estimated — verify on broker")
-            print(f"  {'='*65}")
-            print(f"  Spot: {spot:,.2f} | VIX: {vix:.1f}")
-            print()
-            for leg in w_legs:
-                action_str = "SELL" if leg.is_short else "BUY "
-                print(f"    {action_str} {leg.strike:>6.0f} {leg.option_type}  "
-                      f"@ ₹{leg.entry_premium:>7.2f}  [BS est]")
+                print(f"\n  {'='*65}")
+                print(f"  SUGGESTED WEEKLY TRADE: {w_strategy_name}")
+                print(f"  Expiry: {format_expiry_label(w_exp)} ({w_dte} DTE) | "
+                      f"BS estimated — verify on broker")
+                print(f"  {'='*65}")
+                print(f"  Spot: {spot:,.2f} | VIX: {vix:.1f}")
+                print()
+                for leg in w_legs:
+                    action_str = "SELL" if leg.is_short else "BUY "
+                    print(f"    {action_str} {leg.strike:>6.0f} {leg.option_type}  "
+                          f"@ ₹{leg.entry_premium:>7.2f}  [BS est]")
 
-            total_net = net_credit_w * weekly_lots * config.lot_size
-            total_risk = max_loss_w * weekly_lots * config.lot_size
-            print(f"\n  TRADE SUMMARY ({weekly_lots} lots × {config.lot_size} qty):")
-            print(f"    Expiry:       {format_expiry_label(w_exp)} ({w_dte} DTE)")
-            print(f"    Net Credit:   ₹{net_credit_w:.1f}/unit = ₹{total_net:,.0f} total")
-            print(f"    Max Risk:     ₹{max_loss_w:.1f}/unit = ₹{total_risk:,.0f} total")
-            if w_strategy_name == "Weekly Put Credit Spread":
-                print(f"    Profit Target: {wc.engine_a_profit_target_pct:.0f}% = "
-                      f"₹{total_net * wc.engine_a_profit_target_pct / 100:,.0f}")
-                print(f"    Min Hold:     {wc.engine_a_min_hold_days} trading days")
-                print(f"    Stop Loss:    {wc.stop_loss_pct:.0f}% of credit or breach of short strike")
-                print(f"    Dynamic Exit: distance/strike risk breach only")
-            else:
-                print(f"    Profit Target: none")
-                print(f"    Max Hold:     {wc.engine_b_max_hold_days} trading days")
-                print(f"    Stop Loss:    {wc.stop_loss_pct:.0f}% of credit or breach of short strike")
-                print(f"    Dynamic Exit: trailing delta, trend reversal, max hold")
+                total_net = net_credit_w * weekly_lots * config.lot_size
+                total_risk = max_loss_w * weekly_lots * config.lot_size
+                print(f"\n  TRADE SUMMARY ({weekly_lots} lots × {config.lot_size} qty):")
+                print(f"    Expiry:       {format_expiry_label(w_exp)} ({w_dte} DTE)")
+                print(f"    Net Credit:   ₹{net_credit_w:.1f}/unit = ₹{total_net:,.0f} total")
+                print(f"    Max Risk:     ₹{max_loss_w:.1f}/unit = ₹{total_risk:,.0f} total")
+                if w_strategy_name == "Weekly Put Credit Spread":
+                    print(f"    Profit Target: {wc.engine_a_profit_target_pct:.0f}% = "
+                          f"₹{total_net * wc.engine_a_profit_target_pct / 100:,.0f}")
+                    print(f"    Min Hold:     {wc.engine_a_min_hold_days} trading days")
+                    print(f"    Stop Loss:    {wc.stop_loss_pct:.0f}% of credit or breach of short strike")
+                    print(f"    Dynamic Exit: distance/strike risk breach only")
+                else:
+                    print(f"    Profit Target: none")
+                    print(f"    Max Hold:     {wc.engine_b_max_hold_days} trading days")
+                    print(f"    Stop Loss:    {wc.stop_loss_pct:.0f}% of credit or breach of short strike")
+                    print(f"    Dynamic Exit: trailing delta, trend reversal, max hold")
 
     # ── 6. Combined risk dashboard ──────────────────────────────────────────
     print(f"\n  {'='*75}")

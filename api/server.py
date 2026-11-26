@@ -309,7 +309,17 @@ async def refresh_market_data() -> Dict[str, Any]:
 # Health (public)
 # ============================================================================
 
+def _calendar_cover() -> Dict[str, Any]:
+    """How far the NSE holiday list reaches. Not part of 'healthy': it is a reminder to add next year's list."""
+    from data.expiry_calendar import holidays_covered_through
+    through = holidays_covered_through()
+    left = (through - now_ist().date()).days if through else None
+    return {"covered_through": through.isoformat() if through else None, "days_left": left,
+            "low": left is None or left < CALENDAR_WARN_DAYS}
+
+
 _STARTED = time.monotonic()
+CALENDAR_WARN_DAYS = 30
 STALL_AFTER_SECONDS = 5 * 60      # the auto trader ticks every 60 s
 
 
@@ -336,7 +346,7 @@ def _liveness(request: Request) -> Dict[str, Any]:
     healthy = ledger_ok and not stalled and not backup_stale and _state["status"] == "ready"
     return {"healthy": healthy, "ledger_ok": ledger_ok,
             "scheduler": {"running": running, "auto_tick_age_s": age, "stalled": stalled},
-            "backup": {"stale": backup_stale}}
+            "backup": {"stale": backup_stale}, "calendar": _calendar_cover()}
 
 
 @public_router.get("/health")

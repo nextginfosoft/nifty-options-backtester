@@ -114,6 +114,14 @@ async def alerts_save(body: AlertsIn, request: Request) -> Dict[str, Any]:
     return request.app.state.notifier.status()
 
 
+@router.get("/evidence")
+async def evidence(request: Request) -> Dict[str, Any]:
+    """Closed auto trades summarised honestly (with an error bar once there are enough) next to the backtest claims."""
+    from api import evidence as ev
+    from api.autotrader import AUTO_JOURNAL
+    return ev.build(request.app.state.ledger.list_trades(AUTO_JOURNAL, "closed"))
+
+
 @router.get("/backup")
 async def backup_status(request: Request) -> Dict[str, Any]:
     return request.app.state.backup.status(server.now_ist())
