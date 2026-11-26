@@ -211,3 +211,40 @@ ul.feed li:last-child { border-bottom: 0; }
   .app-header { gap: 6px 10px; }
   .app-header .quote { display: none; }
 }
+
+/* charts */
+:root {
+  --chart-blue: #2a78d6; --chart-red: #e34948; --chart-amber: #eda100;
+  --chart-grid: #e1e0d9; --chart-axis: #c3c2b7; --chart-ink: #898781;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --chart-blue: #3987e5; --chart-red: #e66767; --chart-amber: #c98500;
+    --chart-grid: #2c2c2a; --chart-axis: #383835; --chart-ink: #98a2b5;
+  }
+}
+svg .ch-grid { stroke: var(--chart-grid); stroke-width: 1; }
+svg .ch-base { stroke: var(--chart-axis); stroke-width: 1.5; }
+svg .ch-tick { fill: var(--chart-ink); font-size: 11px; }
+svg .ch-tick-strong { fill: var(--muted); }
+svg .ch-label { fill: var(--text); font-size: 12px; font-weight: 600; }
+svg .ch-area-blue { fill: var(--chart-blue); opacity: 0.1; }
+svg .ch-line-blue { fill: none; stroke: var(--chart-blue); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+svg .ch-dot-blue { fill: var(--chart-blue); stroke: var(--surface); stroke-width: 2; }
+svg .ch-area-red { fill: var(--chart-red); opacity: 0.14; }
+svg .ch-line-red { fill: none; stroke: var(--chart-red); stroke-width: 2; stroke-linejoin: round; }
+svg .ch-hit { fill: transparent; }
+svg .ch-bar-blue { fill: var(--chart-blue); }
+svg .ch-bar-red { fill: var(--chart-red); }
+svg rect.ch-zone-keep { fill: var(--chart-blue); opacity: 0.85; }
+svg rect.ch-zone-part { fill: var(--chart-amber); opacity: 0.85; }
+svg rect.ch-zone-loss { fill: var(--chart-red); opacity: 0.85; }
+svg .ch-strike { stroke: var(--text); stroke-width: 1.5; }
+svg .ch-be { stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.sw.ch-zone-keep { background: var(--chart-blue); }
+.sw.ch-zone-part { background: var(--chart-amber); }
+.sw.ch-zone-loss { background: var(--chart-red); }
+svg .ch-dot-spot { fill: var(--text); stroke: var(--surface); stroke-width: 3; }

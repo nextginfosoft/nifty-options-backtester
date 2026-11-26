@@ -33,6 +33,8 @@ export interface EvidenceView {
   by_exit_reason: { reason: string; n: number }[];
   references: { name: string; rs_per_lot: number; weight: string; note: string }[];
   caveats: string[];
+  curve: { label: string | null; date: string | null; cum_pnl: number; drawdown: number }[];
+  trade_bars: { trade_id: string | null; date: string | null; net: number; per_lot: number }[];
 }
 
 export interface RefreshResult {

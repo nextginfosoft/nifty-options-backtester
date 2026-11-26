@@ -37,11 +37,27 @@ def _t_crit(n: int) -> float:
     return 2.05 if n < 30 else (2.0 if n < 60 else 1.96)
 
 
+def series(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Chart data: cumulative net P&L with the drawdown from its running peak (both Rs, starting at 0), and per-trade bars."""
+    ordered = sorted(trades, key=lambda t: (t.get("exit_date") or "", t.get("trade_id") or ""))
+    cum = peak = 0.0
+    curve = [{"label": "Start", "date": None, "cum_pnl": 0.0, "drawdown": 0.0}]
+    bars = []
+    for t in ordered:
+        net = float(t["net_pnl"])
+        cum += net
+        peak = max(peak, cum)
+        curve.append({"label": t.get("trade_id"), "date": t.get("exit_date"), "cum_pnl": round(cum, 2), "drawdown": round(cum - peak, 2)})
+        bars.append({"trade_id": t.get("trade_id"), "date": t.get("exit_date"), "net": round(net, 2),
+                     "per_lot": round(net / int(t["lots"]), 1)})
+    return {"curve": curve, "trade_bars": bars}
+
+
 def build(closed: List[Dict[str, Any]]) -> Dict[str, Any]:
     trades = [t for t in closed if t.get("net_pnl") is not None and t.get("lots")]
     n = len(trades)
     out: Dict[str, Any] = {"n": n, "references": REFERENCES, "caveats": CAVEATS,
-                           "thresholds": {"early": MIN_EARLY, "readable": MIN_READABLE}}
+                           "thresholds": {"early": MIN_EARLY, "readable": MIN_READABLE}, **series(trades)}
     if n == 0:
         return {**out, "verdict": {"code": "NO_DATA", "text": "No closed auto trades yet."}}
 

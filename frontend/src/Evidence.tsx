@@ -1,4 +1,5 @@
 import { useApi } from "./api";
+import { DrawdownChart, EquityChart, TradeBars } from "./charts";
 import { inr, num, pct, humanize, tone } from "./format";
 import type { EvidenceView } from "./types";
 import { Banner, Card, Empty, ErrorText, Pill, Row } from "./ui";
@@ -64,6 +65,22 @@ export default function Evidence() {
           </p>
         </Card>
       </div>
+
+      {e.n > 0 ? (
+        <>
+          <Card title="Cumulative profit after fees">
+            <EquityChart points={e.curve} />
+            <DrawdownChart points={e.curve} />
+            <p className="note" style={{ marginBottom: 0 }}>
+              Top: running total from the first trade. Bottom: how far below its previous high the total is. {e.n < 5 ? "More points appear as trades close." : ""}
+            </p>
+          </Card>
+          <Card title="Profit or loss per trade">
+            <TradeBars bars={e.trade_bars} />
+            <p className="note" style={{ marginBottom: 0 }}>Each bar is one closed trade after fees. Hover or tap a bar for the details.</p>
+          </Card>
+        </>
+      ) : null}
 
       {e.n > 0 ? (
         <div className="cols">
