@@ -23,6 +23,8 @@ from fastapi.staticfiles import StaticFiles
 
 from api import auth, autologin, autotrader, broker_routes, credentials_routes, datarefresh, routes_auto, routes_ledger, server
 from api.autotrader import AutoTrader, KiteFeed, ServerData
+from api import backup as backup_mod
+from api.backup import BackupService
 from api.notify import Notifier
 from api.credentials import CredentialError, CredentialStore
 from api.ledger import Ledger, LedgerError, NotFound
@@ -52,8 +54,9 @@ def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] 
         sched = asyncio.create_task(autologin.scheduler(app)) if run_scheduler else None
         refresher = asyncio.create_task(datarefresh.scheduler()) if run_scheduler else None
         trader = asyncio.create_task(autotrader.scheduler(app)) if run_scheduler else None
+        backups = asyncio.create_task(backup_mod.scheduler(app)) if run_scheduler else None
         yield
-        for t in (task, sched, refresher, trader):
+        for t in (task, sched, refresher, trader, backups):
             if t and not t.done():
                 t.cancel()
 
@@ -66,12 +69,15 @@ def create_app(settings: Optional[Settings] = None, load_market: Optional[bool] 
         lifespan=lifespan,
     )
     app.state.settings = settings
+    app.state.scheduler_running = bool(run_scheduler)
     app.state.ledger = Ledger(settings.storage_dir / "ledger.sqlite3")
     app.state.creds = CredentialStore(settings.storage_dir, settings.credentials_key, settings.is_production)
     app.state.alert_creds = CredentialStore(settings.storage_dir, settings.credentials_key, settings.is_production,
                                             filename="telegram_alerts.enc")
     app.state.notifier = Notifier(app.state.alert_creds)
     app.state.ledger.on_event = app.state.notifier.notify_event
+    app.state.backup = BackupService(app.state.ledger, app.state.alert_creds, app.state.notifier,
+                                     settings.storage_dir / "backups")
     app.state.autotrader = AutoTrader(
         app.state.ledger, KiteFeed(), ServerData(server._state), lot_size=settings.lot_size,
         initial_capital=float(os.getenv("PAPER_INITIAL_CAPITAL", "2500000")), regime_fn=server._infer_regime)

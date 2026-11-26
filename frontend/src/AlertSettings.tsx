@@ -1,15 +1,20 @@
 import { useState, type FormEvent } from "react";
 import { api, useApi } from "./api";
-import type { AlertStatus } from "./types";
+import type { AlertStatus, BackupStatus } from "./types";
 import { Card, ErrorText, Pill } from "./ui";
 
 type Reply = AlertStatus & { ok?: boolean; detail?: string };
 
+function when(iso: string | null): string {
+  return iso ? iso.replace("T", " ").slice(0, 16) + " IST" : "never";
+}
+
 export default function AlertSettings() {
   const view = useApi<AlertStatus>("/api/auto/alerts", 30000);
+  const backup = useApi<BackupStatus>("/api/auto/backup", 60000);
   const [token, setToken] = useState("");
   const [chat, setChat] = useState("");
-  const [busy, setBusy] = useState<"save" | "detect" | "test" | "remove" | null>(null);
+  const [busy, setBusy] = useState<"save" | "detect" | "test" | "remove" | "backup" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -26,6 +31,7 @@ export default function AlertSettings() {
       if (r.ok === false) setError(r.detail ?? "Failed");
       else if (text) setMessage(text);
       view.reload();
+      backup.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -119,6 +125,26 @@ export default function AlertSettings() {
           </button>
         </div>
       </form>
+
+      <div style={{ marginTop: 16 }}>
+        <strong>Ledger backup</strong>{" "}
+        <Pill tone={backup.data?.stale ? "bad" : backup.data?.last_offsite_at ? "good" : "warn"}>
+          {backup.data?.stale ? "Overdue" : backup.data?.last_offsite_at ? "OK" : "Not sent yet"}
+        </Pill>
+        <p className="note" style={{ margin: "6px 0" }}>
+          Every day at 16:00 IST an encrypted copy of the trade ledger is sent to this Telegram chat, and the last {backup.data?.local_copies ?? 0} are
+          kept on the server. Last sent off-server: {when(backup.data?.last_offsite_at ?? null)}.
+          {backup.data && !backup.data.offsite_configured ? " Set up Telegram above to get the off-server copy." : ""}
+          {backup.data?.last_error ? ` Last problem: ${backup.data.last_error}` : ""}
+        </p>
+        <button
+          type="button"
+          disabled={busy !== null || !v?.configured}
+          onClick={() => void run("backup", "/api/auto/backup/run", "POST", {}, (r) => (r.ok ? "Backup sent. Check Telegram." : null))}
+        >
+          {busy === "backup" ? "Backing up…" : "Back up now"}
+        </button>
+      </div>
     </Card>
   );
 }

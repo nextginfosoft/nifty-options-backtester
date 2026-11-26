@@ -130,6 +130,22 @@ class CredentialStore:
         self._write(data)
         return data
 
+    def encrypt_bytes(self, data: bytes) -> bytes:
+        """Encrypt arbitrary bytes with the same key (used for backups). Never falls back to plaintext."""
+        f = self._get_fernet(create=True)
+        if f is None:
+            raise CredentialError("Set CREDENTIALS_KEY on the server to encrypt backups")
+        return f.encrypt(data)
+
+    def decrypt_bytes(self, token: bytes) -> bytes:
+        f = self._get_fernet(create=False)
+        if f is None:
+            raise CredentialError("No encryption key available")
+        try:
+            return f.decrypt(token)
+        except InvalidToken:
+            raise CredentialError("Cannot decrypt: wrong CREDENTIALS_KEY or damaged file")
+
     def delete(self) -> None:
         for f in (self._file,):
             try:

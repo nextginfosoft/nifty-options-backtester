@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 API = "https://api.telegram.org/bot{token}/{method}"
 TIMEOUT_SECONDS = 8
+UPLOAD_TIMEOUT_SECONDS = 60
+MAX_DOCUMENT_BYTES = 45 * 1024 * 1024        # Telegram bots may upload up to 50 MB
 TOKEN_RE = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{30,}$")
 CHAT_RE = re.compile(r"^(-?\d{3,20}|@[A-Za-z][A-Za-z0-9_]{4,})$")
 
@@ -139,6 +141,34 @@ class Notifier:
             self.last_sent_at = time.time()
         else:
             logger.warning("Alert delivery failed: %s", detail)
+        return ok, detail
+
+    def send_document(self, filename: str, data: bytes, caption: str = "") -> Tuple[bool, str]:
+        """Blocking upload of a file to the saved chat (used for the encrypted ledger backup). Never raises."""
+        creds = self._credentials()
+        if creds is None:
+            return False, "Telegram is not set up yet: save a bot token and chat id"
+        if len(data) > MAX_DOCUMENT_BYTES:
+            return False, "File is too large for Telegram"
+        token, chat = creds
+        boundary = "----niftysell" + os.urandom(8).hex()
+        parts = [("chat_id", chat), ("caption", caption[:900])]
+        body = b"".join(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode() for k, v in parts)
+        body += (f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{filename}"\r\n'
+                 f"Content-Type: application/octet-stream\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        req = urllib.request.Request(API.format(token=token, method="sendDocument"), data=body,
+                                     headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        try:
+            with urllib.request.urlopen(req, timeout=UPLOAD_TIMEOUT_SECONDS) as resp:   # noqa: S310 - fixed https host
+                ok, detail = 200 <= resp.status < 300, f"HTTP {resp.status}"
+        except Exception as exc:  # noqa: BLE001 - never echo the exception text: it can contain the URL with the token
+            ok, detail = False, f"{exc.__class__.__name__}" + (f" {exc.code}" if hasattr(exc, "code") else "")
+        self.last_ok, self.last_error = ok, (None if ok else detail)
+        if ok:
+            self.last_sent_at = time.time()
+        else:
+            logger.warning("Document delivery failed: %s", detail)
         return ok, detail
 
     def detect_chat_id(self) -> Tuple[Optional[str], str]:
