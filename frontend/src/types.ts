@@ -266,6 +266,47 @@ export interface TradeFills {
   source: { entry: string | null; exit: string | null };
 }
 
+export interface ExitPreviewTrade {
+  trade_id: string;
+  strategy?: string;
+  expiry_date?: string;
+  dte?: number;
+  days_held?: number;
+  decision: "EXIT" | "HOLD" | "SETTLE" | "UNKNOWN";
+  reason: string;
+  message?: string;
+  entry_credit?: number;
+  exit_debit_est?: number;
+  pct_credit_captured?: number | null;
+  gross_pnl_est?: number;
+  fees_est?: number;
+  net_pnl_est?: number;
+  legs?: { action: string; strike: number; option_type: string; exit_price: number; bid: number; ask: number }[];
+}
+
+export interface ExitPreview {
+  ok: boolean;
+  reason?: string;
+  in_session: boolean;
+  auto_enabled: boolean;
+  as_of: string;
+  spot?: number;
+  vix?: number;
+  trades: ExitPreviewTrade[];
+}
+
+export interface AlertStatus {
+  configured: boolean;
+  channel: string;
+  last_ok: boolean | null;
+  last_error: string | null;
+  last_sent_at: number | null;
+  saved: { bot_token: boolean; chat_id: boolean };
+  chat_id_masked: string;
+  source: "dashboard" | "environment" | null;
+  encryption_available: boolean;
+}
+
 export interface AutoPreview {
   decision: "ENTER" | "SKIP";
   code: string;

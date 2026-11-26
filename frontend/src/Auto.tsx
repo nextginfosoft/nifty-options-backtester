@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { api, useApi } from "./api";
 import { humanize, inr, num, pct, tone } from "./format";
-import type { AutoEvent, AutoPreview, AutoStatus, LiveTrades, Trade, TradeFills } from "./types";
+import type { AutoEvent, AutoPreview, AutoStatus, ExitPreview, LiveTrades, Trade, TradeFills } from "./types";
+import AlertSettings from "./AlertSettings";
 import { Banner, Card, Empty, ErrorText, Pill, Row } from "./ui";
 
 const kindTone = (k: AutoEvent["kind"]): "good" | "bad" | "warn" | "" =>
@@ -37,6 +38,45 @@ function Preview({ p }: { p: AutoPreview }) {
       {p.blocks.length ? (
         <p className="note">Schedule gates that would block a real entry right now: {p.blocks.map((b) => b.message).join("; ")}.</p>
       ) : null}
+    </div>
+  );
+}
+
+function ExitCheck({ p }: { p: ExitPreview }) {
+  if (!p.ok) return <ErrorText error={p.reason ?? "Live quotes unavailable"} />;
+  return (
+    <div>
+      <Row k="As of">{p.as_of.replace("T", " ").slice(0, 16)} IST{p.spot != null ? ` · Nifty ${num(p.spot)} · VIX ${num(p.vix)}` : ""}</Row>
+      {!p.in_session ? <p className="note">The market is closed, so the auto trader is not evaluating exits right now. This is what the rules say on the latest prices.</p> : null}
+      {p.trades.length === 0 ? <Empty>No open position to check.</Empty> : p.trades.map((t) => (
+        <div key={t.trade_id}>
+          <Row k={t.trade_id}>
+            <Pill tone={t.decision === "EXIT" ? "bad" : t.decision === "HOLD" ? "good" : "warn"}>{t.decision}</Pill>{" "}
+            {t.decision === "EXIT" ? `rule: ${humanize(t.reason)}` : t.decision === "HOLD" ? "no exit rule has triggered" : t.message ?? humanize(t.reason)}
+          </Row>
+          {t.legs ? (
+            <>
+              <Row k="If closed now">
+                debit {num(t.exit_debit_est)} vs credit {num(t.entry_credit)} · {pct(t.pct_credit_captured)} of credit captured · {t.dte} DTE · {t.days_held} session(s) held
+              </Row>
+              <Row k="Estimated result">
+                gross <span className={`num ${tone(t.gross_pnl_est)}`}>{inr(t.gross_pnl_est)}</span> − fees {inr(t.fees_est)} ={" "}
+                net <span className={`num ${tone(t.net_pnl_est)}`}>{inr(t.net_pnl_est)}</span>
+              </Row>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Leg</th><th>Bid</th><th>Ask</th><th>Would fill at</th></tr></thead>
+                  <tbody>
+                    {t.legs.map((l, i) => (
+                      <tr key={i}><td>{l.action === "SELL" ? "Buy back" : "Sell"} {l.strike}{l.option_type}</td><td className="num">{num(l.bid)}</td><td className="num">{num(l.ask)}</td><td className="num">{num(l.exit_price)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }
@@ -81,8 +121,8 @@ function Fills({ tradeId }: { tradeId: string }) {
       </Row>
       {d.exit && !d.exit.per_leg_recorded ? (
         <p className="note">
-          This trade was closed by hand ({d.source.exit}), so only the net exit debit was recorded, not per-leg exit prices, an exit time or fees.
-          Trades closed by the auto trader record all of them.
+          This trade was closed by hand ({d.source.exit}), so only the net exit debit was recorded, not per-leg exit prices.
+          Trades closed by the auto trader record all of them. Older hand closes also lack an exit time and fees.
         </p>
       ) : null}
     </div>
@@ -99,6 +139,7 @@ export default function Auto() {
   const [error, setError] = useState<string | null>(null);
   const [lots, setLots] = useState("");
   const [preview, setPreview] = useState<AutoPreview | null>(null);
+  const [exitCheck, setExitCheck] = useState<ExitPreview | null>(null);
 
   async function act(path: string, method = "POST", body: unknown = {}) {
     setBusy(true);
@@ -119,6 +160,18 @@ export default function Auto() {
     setError(null);
     try {
       setPreview(await api<AutoPreview>("/api/auto/preview"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runExitCheck() {
+    setBusy(true);
+    setError(null);
+    try {
+      setExitCheck(await api<ExitPreview>("/api/auto/exit-preview"));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -230,6 +283,10 @@ export default function Auto() {
         <p className="note">Full trade history and CSV export are on the Trades tab, journal “Auto paper trader”.</p>
       </Card>
 
+      <Card title="Exit check (what the rules say now)" actions={<button disabled={busy} onClick={runExitCheck}>Check exits now</button>}>
+        {exitCheck ? <ExitCheck p={exitCheck} /> : <Empty>Applies the exit rules to each open position on live prices. Nothing is closed or recorded.</Empty>}
+      </Card>
+
       <Card
         title="Execution detail (buy / sell prices)"
         actions={<a className="button" href="/api/export/fills.csv?journal_id=AUTO">Download fills CSV</a>}
@@ -249,6 +306,8 @@ export default function Auto() {
           </>
         )}
       </Card>
+
+      <AlertSettings />
 
       <Card title="Decision timeline (newest first)">
         {(events.data?.events.length ?? 0) === 0 ? (

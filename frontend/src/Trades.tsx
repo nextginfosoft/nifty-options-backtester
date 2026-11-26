@@ -178,12 +178,12 @@ function CloseForm({ trade, suggested, onDone, onCancel }: { trade: Trade; sugge
   const [debit, setDebit] = useState("");
   const [reason, setReason] = useState("profit_target");
   const [date, setDate] = useState(todayISO());
-  const [brokerage, setBrokerage] = useState("0");
+  const [brokerage, setBrokerage] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const preview = debit === "" ? null : (trade.entry_credit - Number(debit)) * trade.lots * trade.lot_size - Number(brokerage || 0);
+  const preview = debit === "" ? null : (trade.entry_credit - Number(debit)) * trade.lots * trade.lot_size - (brokerage === "" ? 0 : Number(brokerage));
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -192,7 +192,7 @@ function CloseForm({ trade, suggested, onDone, onCancel }: { trade: Trade; sugge
     try {
       await api(`/api/trades/${encodeURIComponent(trade.trade_id)}/close?journal_id=${encodeURIComponent(trade.journal_id)}`, {
         method: "POST",
-        body: { exit_debit: Number(debit), exit_reason: reason, exit_date: date, brokerage: Number(brokerage || 0), notes },
+        body: { exit_debit: Number(debit), exit_reason: reason, exit_date: date, ...(brokerage === "" ? {} : { brokerage: Number(brokerage) }), notes },
       });
       onDone();
     } catch (err) {
@@ -211,7 +211,7 @@ function CloseForm({ trade, suggested, onDone, onCancel }: { trade: Trade; sugge
           </select>
         </label>
         <label className="field">Exit date<input type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></label>
-        <label className="field">Brokerage (₹)<input type="number" min="0" value={brokerage} onChange={(e) => setBrokerage(e.target.value)} /></label>
+        <label className="field">Fees (₹)<input type="number" min="0" placeholder="auto-estimate" value={brokerage} onChange={(e) => setBrokerage(e.target.value)} /></label>
         <label className="field span-2">Notes<input value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} /></label>
       </div>
       <ErrorText error={error} />

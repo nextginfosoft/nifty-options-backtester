@@ -19,7 +19,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS journals (
@@ -333,6 +333,8 @@ class Ledger:
         with self._conn() as c:
             c.execute("DELETE FROM kv WHERE key=?", (key,))
 
+    on_event: Optional[Callable[..., None]] = None      # optional hook (alerts); called after the row is stored
+
     def add_event(self, at: str, kind: str, code: str, message: str, trade_id: Optional[str] = None,
                   data: Optional[Dict[str, Any]] = None) -> None:
         with self._conn() as c:
@@ -340,6 +342,11 @@ class Ledger:
                 "INSERT INTO auto_events (at, day, kind, code, message, trade_id, data_json) VALUES (?,?,?,?,?,?,?)",
                 (at, at[:10], kind, code, message, trade_id, json.dumps(data, default=str) if data else None),
             )
+        if self.on_event is not None:
+            try:
+                self.on_event(at, kind, code, message, trade_id)
+            except Exception:  # noqa: BLE001 - an alert problem must never break the ledger write
+                pass
 
     def list_events(self, limit: int = 200, day: Optional[str] = None) -> List[Dict[str, Any]]:
         q, args = "SELECT * FROM auto_events", []

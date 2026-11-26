@@ -403,3 +403,51 @@ def test_preview_route(api):
     r = api.get("/api/auto/preview").json()
     assert r["decision"] in ("ENTER", "SKIP") and "blocks" in r
     assert api.get("/api/trades?journal_id=AUTO").json()["count"] == 0         # a preview never records a trade
+
+
+# ------------------------------------------------------------------ exit preview + hand-close defaults
+def test_exit_preview_reports_the_decision_without_acting(env):
+    at, ledger, feed, _ = env
+    t = enter(at, ledger, feed, vix=24.0)
+    before = ledger.list_events(300)
+    held = at.exit_preview(ist(2026, 11, 18, 11, 0))
+    row = held["trades"][0]
+    assert held["ok"] and held["in_session"] and row["trade_id"] == t["trade_id"] and row["decision"] == "HOLD"
+    assert row["legs"] and row["exit_debit_est"] > 0 and row["fees_est"] > 0
+    feed.scale = 0.1                                               # premiums collapse: the rules would exit
+    would = at.exit_preview(ist(2026, 11, 19, 11, 0))["trades"][0]
+    assert would["decision"] == "EXIT" and would["reason"] == "profit_target" and would["net_pnl_est"] > 0
+    assert len(open_trades(ledger)) == 1                           # nothing was closed
+    assert ledger.list_events(300) == before                       # and nothing was recorded
+    assert ledger.kv_get(at_mod.KV_TRACKER + t["trade_id"]) is not None
+
+
+def test_exit_preview_outside_session_and_without_quotes(env):
+    at, ledger, feed, _ = env
+    enter(at, ledger, feed, vix=24.0)
+    assert at.exit_preview(ist(2026, 11, 18, 20, 0))["in_session"] is False
+    feed.fail = FeedError("Kite token expired")
+    r = at.exit_preview(ist(2026, 11, 18, 11, 0))
+    assert r["ok"] is False and "quotes" in r["reason"] and r["trades"] == []
+
+
+def test_exit_preview_route_and_alert_status(api):
+    api.post("/api/auto/enable", json={}, headers=H)
+    r = api.get("/api/auto/exit-preview").json()
+    assert r["ok"] is True and r["trades"] == []
+    assert api.get("/api/auto/alerts").json()["configured"] is False
+    assert api.post("/api/auto/alerts/test", headers=H).json()["ok"] is False      # not configured: reported, not raised
+
+
+def test_hand_close_defaults_fees_and_time(api):
+    api.post("/api/auto/enable", json={}, headers=H)
+    leg = lambda a, k: {"action": a, "strike": k, "option_type": "PE", "entry_price": 50.0 if a == "SELL" else 20.0}
+    body = {"journal_id": "AUTO", "strategy": "weekly_pcs", "entry_date": "2026-11-17", "expiry_date": "2026-11-23",
+            "legs": [leg("SELL", 24800), leg("BUY", 24400)], "lots": 15}
+    tid = api.post("/api/trades", json=body, headers=H).json()["trade_id"]
+    closed = api.post(f"/api/trades/{tid}/close?journal_id=AUTO", json={"exit_debit": 10, "exit_reason": "profit_target"}, headers=H).json()
+    assert closed["brokerage"] > 0 and closed["net_pnl"] == pytest.approx(closed["gross_pnl"] - closed["brokerage"], abs=0.01)
+    assert closed["exit_time_ist"] and "estimated" in closed["notes"]
+    tid2 = api.post("/api/trades", json={**body, "trade_id": "T2"}, headers=H).json()["trade_id"]
+    c2 = api.post(f"/api/trades/{tid2}/close?journal_id=AUTO", json={"exit_debit": 10, "exit_reason": "manual", "brokerage": 0}, headers=H).json()
+    assert c2["brokerage"] == 0                                    # an explicit 0 is respected

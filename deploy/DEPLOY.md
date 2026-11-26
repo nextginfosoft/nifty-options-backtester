@@ -61,6 +61,7 @@ Fill in:
 | `SESSION_SECRET` | `openssl rand -hex 32` (32+ characters; the app refuses to start without it) |
 | `KITE_API_KEY` / `KITE_API_SECRET` | optional, from developers.kite.trade (or enter them in the dashboard, see step 6) |
 | `CREDENTIALS_KEY` | `openssl rand -hex 32`. Needed to save Zerodha details from the dashboard; keep it out of the data volume and backups. If you change it, saved credentials must be re-entered |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | optional fallback for push alerts. The easier way is the "Telegram alerts" card on the Auto tab: paste the @BotFather token, press Start on your bot, click "Find my chat ID" (stored encrypted with `CREDENTIALS_KEY`). Values saved in the dashboard win over these |
 
 `deploy/.env` is git-ignored. Never commit it, and never put these values in front-end code.
 

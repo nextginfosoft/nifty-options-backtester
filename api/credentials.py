@@ -44,9 +44,9 @@ def mask_user_id(user_id: str) -> str:
 
 
 class CredentialStore:
-    def __init__(self, storage_dir: Path, key: Optional[str], production: bool):
+    def __init__(self, storage_dir: Path, key: Optional[str], production: bool, filename: str = "kite_credentials.enc"):
         self._dir = Path(storage_dir)
-        self._file = self._dir / "kite_credentials.enc"
+        self._file = self._dir / filename
         self._key_file = self._dir / ".credentials.key"
         self._production = production
         self._key = key
@@ -115,6 +115,18 @@ class CredentialStore:
                 data[name] = value
         if auto_login is not None:
             data["auto_login"] = bool(auto_login)
+        self._write(data)
+        return data
+
+    def merge(self, updates: Dict[str, Optional[str]]) -> Dict[str, Any]:
+        """Generic variant of update() for other secret records: non-blank string values replace stored ones."""
+        if not self.encryption_available:
+            raise CredentialError("Set CREDENTIALS_KEY on the server to store credentials")
+        data = self.load()
+        for name, value in updates.items():
+            value = (value or "").strip()
+            if value:
+                data[name] = value
         self._write(data)
         return data
 
