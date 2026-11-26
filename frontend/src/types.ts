@@ -7,6 +7,28 @@ export interface Health {
   data_as_of: string | null;
   last_refresh: RefreshResult | null;
   timestamp: string;
+  calendar?: { covered_through: string | null; days_left: number | null; low: boolean };
+}
+
+export interface EvidenceView {
+  n: number;
+  verdict: { code: string; text: string };
+  wins?: number;
+  win_rate_pct?: number;
+  total_net?: number;
+  fees_total?: number;
+  avg_per_trade?: number;
+  avg_win?: number | null;
+  avg_loss?: number | null;
+  best_trade?: number;
+  worst_trade?: number;
+  profit_factor?: number | null;
+  per_lot?: { mean: number; stdev: number | null; ci95: [number, number] | null };
+  trades_needed_for_precision?: { target_rs_per_lot: number; trades: number | null };
+  by_strategy: { strategy: string; n: number; net: number }[];
+  by_exit_reason: { reason: string; n: number }[];
+  references: { name: string; rs_per_lot: number; weight: string; note: string }[];
+  caveats: string[];
 }
 
 export interface RefreshResult {

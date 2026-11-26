@@ -28,13 +28,25 @@ def problems(h: Dict[str, Any]) -> List[str]:
     return found
 
 
+def warnings(h: Dict[str, Any]) -> List[str]:
+    """Things to do soon that do not make the site unhealthy."""
+    cal = h.get("calendar") or {}
+    if cal.get("low"):
+        return [f"the NSE holiday list is only covered through {cal.get('covered_through')} "
+                f"({cal.get('days_left')} days left): add next year's list to data/nse_holidays.json"]
+    return []
+
+
 def main() -> int:
     try:
         health = json.load(sys.stdin)
     except ValueError:
         print("UNHEALTHY: /api/health did not return JSON")
         return 1
-    found = problems(health if isinstance(health, dict) else {})
+    health = health if isinstance(health, dict) else {}
+    for w in warnings(health):
+        print(f"::warning::{w}")
+    found = problems(health)
     if found:
         print("UNHEALTHY: " + "; ".join(found))
         return 1

@@ -130,7 +130,7 @@ class TestHolidayFile:
 
     def test_expected_forward_holidays_listed(self):
         closed = {e["date"]: e for e in self._entries() if e["segment_closed"]}
-        assert set(closed) == {"2026-10-20", "2026-11-10", "2026-11-24"}
+        assert set(closed) == {"2026-10-20", "2026-11-10", "2026-11-24", "2026-12-25"}   # Christmas added 2026-11-26
 
     def test_muhurat_session_is_not_a_closure(self):
         muhurat = {e["date"]: e for e in self._entries() if e.get("muhurat_session")}

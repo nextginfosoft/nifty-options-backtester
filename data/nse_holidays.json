@@ -3,6 +3,7 @@
     "NSE trading holidays used by data/expiry_calendar.py. An expiry that falls on a segment_closed holiday moves to the previous trading day.",
     "Forward-looking only (on/after 2026-10-19) for 'holidays'. Historical exchange holidays that shifted an expiry before 2026-10-19 are listed separately under 'historical_expiry_closures' (derived from the NSE F&O archive, see tests/test_expiry_calendar_vs_archive.py); they do not affect the 'holidays' list.",
     "Add each new exchange holiday list here every year and re-verify against the NSE holiday circular/API.",
+    "covered_through is the last date the list is known to be complete for. Bump it when a full year's list is added; the dashboard warns when fewer than 30 days of cover remain (NSE usually publishes the next year's list in late December).",
     "verified=true means confirmed against the official NSE holiday master (source field). verified=false means not confirmed; the entry is still applied.",
     "Muhurat sessions are informational only (muhurat_session=true, segment_closed=false) and do not shift expiries by themselves. Diwali days on which the archive shows the expiry moved (2021-11-04, 2025-10-21) are listed under historical_expiry_closures."
   ],
@@ -42,8 +43,18 @@
       "verified": true,
       "source": "https://www.nseindia.com/api/holiday-master?type=trading (CM and FO segments); https://www.nseindia.com/resources/exchange-communication-holidays",
       "notes": "Tuesday. Monthly expiry (last Tuesday of Nov 2026) moves to Monday 2026-11-23."
+    },
+    {
+      "date": "2026-12-25",
+      "name": "Christmas",
+      "segment_closed": true,
+      "muhurat_session": false,
+      "verified": false,
+      "source": "NSE 2026 holiday circular as reported by public sources; not yet re-checked against https://www.nseindia.com/api/holiday-master?type=trading",
+      "notes": "Friday. A fixed civil holiday that NSE closes every year. No expiry falls on it (Tuesday expiries), so only the auto trader's market-day check is affected. Re-verify against the holiday master and set verified=true."
     }
   ],
+  "covered_through": "2026-12-31",
   "historical_expiry_closures": [
     {
       "date": "2019-03-21",

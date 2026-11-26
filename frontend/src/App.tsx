@@ -3,18 +3,20 @@ import { api, setUnauthorizedHandler, useApi } from "./api";
 import Auto from "./Auto";
 import Broker from "./Broker";
 import Dashboard from "./Dashboard";
+import Evidence from "./Evidence";
 import DailyLog from "./DailyLog";
 import Login from "./Login";
 import Trades from "./Trades";
 import { num } from "./format";
 import type { Health, Journal, Live } from "./types";
-import { Pill } from "./ui";
+import { Banner, Pill } from "./ui";
 
-type Tab = "dashboard" | "trades" | "auto" | "log" | "broker";
+type Tab = "dashboard" | "trades" | "auto" | "evidence" | "log" | "broker";
 const TABS: { id: Tab; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "trades", label: "Trades" },
   { id: "auto", label: "Auto trader" },
+  { id: "evidence", label: "Evidence" },
   { id: "log", label: "Daily log" },
   { id: "broker", label: "Broker" },
 ];
@@ -132,6 +134,12 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       </nav>
 
       <main className="page">
+        {health.data?.calendar?.low ? (
+          <Banner tone="warn">
+            The NSE holiday list is only covered through {health.data.calendar.covered_through ?? "an unknown date"}. Add next year&apos;s
+            list to data/nse_holidays.json when NSE publishes it (usually late December), or the auto trader will treat holidays as trading days.
+          </Banner>
+        ) : null}
         {tab === "dashboard" && <Dashboard journalId={current?.journal_id ?? ""} health={health.data} />}
         {tab === "trades" && (
           <Trades
@@ -144,6 +152,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           />
         )}
         {tab === "auto" && <Auto />}
+        {tab === "evidence" && <Evidence />}
         {tab === "log" && <DailyLog journal={current} />}
         {tab === "broker" && <Broker />}
       </main>
