@@ -18,7 +18,7 @@ export default function Broker() {
     const p = new URLSearchParams(window.location.search).get("broker");
     if (p === "connected" || p === "error") {
       setFlash(p);
-      window.history.replaceState({}, "", window.location.pathname + "#broker");
+      window.history.replaceState({}, "", window.location.pathname + "#settings");
       status.reload();
       live.reload();
     }

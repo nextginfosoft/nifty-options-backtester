@@ -2,7 +2,6 @@ import { useState } from "react";
 import { api, useApi } from "./api";
 import { humanize, inr, num, pct, tone } from "./format";
 import type { AutoEvent, AutoPreview, AutoStatus, ExitPreview, LiveTrades, Trade, TradeFills } from "./types";
-import AlertSettings from "./AlertSettings";
 import { Banner, Card, Empty, ErrorText, Pill, Row } from "./ui";
 
 const kindTone = (k: AutoEvent["kind"]): "good" | "bad" | "warn" | "" =>
@@ -306,8 +305,6 @@ export default function Auto() {
           </>
         )}
       </Card>
-
-      <AlertSettings />
 
       <Card title="Decision timeline (newest first)">
         {(events.data?.events.length ?? 0) === 0 ? (

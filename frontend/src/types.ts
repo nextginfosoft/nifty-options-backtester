@@ -8,6 +8,10 @@ export interface Health {
   last_refresh: RefreshResult | null;
   timestamp: string;
   calendar?: { covered_through: string | null; days_left: number | null; low: boolean };
+  healthy?: boolean;
+  ledger_ok?: boolean;
+  scheduler?: { running: boolean; auto_tick_age_s: number | null; stalled: boolean };
+  backup?: { stale: boolean };
 }
 
 export interface EvidenceView {
